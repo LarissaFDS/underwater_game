@@ -13,6 +13,7 @@ services:
     volumes:
       - ./server:/app/server
       - ./shared:/app/shared
+      - /app/server/node_modules
     ports:
       - "3001:3001"
     #Instala as dependências e roda o script de dev
@@ -31,6 +32,7 @@ services:
     volumes:
       - ./client:/app/client
       - ./shared:/app/shared
+      - /app/client/node_modules
     ports:
       - "5173:5173" #Porta padrão do Vite
     #O "--host" é obrigatório no Vite dentro do Docker para liberar o acesso ao navegador da sua máquina física

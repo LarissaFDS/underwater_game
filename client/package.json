@@ -1,6 +1,18 @@
 {
   "name": "ocean-client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
-    "dev": "vite"
+    "dev": "vite",
+    "build": "tsc && vite build"
+  },
+  "dependencies": {
+    "phaser": "^3.80.1",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0"
   }
 }

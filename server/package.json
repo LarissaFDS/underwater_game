@@ -1,6 +1,16 @@
 {
   "name": "ocean-server",
+  "version": "1.0.0",
   "scripts": {
     "dev": "ts-node-dev src/index.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ts-node-dev": "^2.0.0",
+    "@types/express": "^4.17.21"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
   }
 }
