@@ -1,6 +1,10 @@
 # underwater_game
- This is a project for a software engineering course.
- 
+
+This is a project for a software engineering course.
+
+### 🗂️ Estrutura do projeto (Monorepo)
+
+```text
 /ocean-game 
 ├── docker-compose.yml       <-- O maestro que roda tudo
 ├── /client                  <-- Onde o FRONTEND vai trabalhar (Vite + Phaser)
