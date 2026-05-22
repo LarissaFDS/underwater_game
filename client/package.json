@@ -1,0 +1,6 @@
+{
+  "name": "ocean-client",
+  "scripts": {
+    "dev": "vite"
+  }
+}

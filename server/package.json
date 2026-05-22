@@ -1,0 +1,6 @@
+{
+  "name": "ocean-server",
+  "scripts": {
+    "dev": "ts-node-dev src/index.ts"
+  }
+}

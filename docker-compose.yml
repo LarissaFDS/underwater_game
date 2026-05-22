@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  #----------------------------------------
+  # MICROSSERVIÇO: BACKEND (Node.js + Socket.IO)
+  #----------------------------------------
+  server:
+    image: node:20-alpine
+    container_name: ocean_server
+    working_dir: /app/server
+    #Mapeamos a pasta local para dentro do container. 
+    #Assim, ao salvar um arquivo, o Node recarrega automaticamente.
+    volumes:
+      - ./server:/app/server
+      - ./shared:/app/shared
+    ports:
+      - "3001:3001"
+    #Instala as dependências e roda o script de dev
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - PORT=3001
+      - NODE_ENV=development
+
+  #----------------------------------------
+  # MICROSSERVIÇO: FRONTEND (Vite + Phaser)
+  #----------------------------------------
+  client:
+    image: node:20-alpine
+    container_name: ocean_client
+    working_dir: /app/client
+    volumes:
+      - ./client:/app/client
+      - ./shared:/app/shared
+    ports:
+      - "5173:5173" #Porta padrão do Vite
+    #O "--host" é obrigatório no Vite dentro do Docker para liberar o acesso ao navegador da sua máquina física
+    command: sh -c "npm install && npm run dev -- --host"
+    environment:
+      - VITE_API_URL=http://localhost:3001
+    depends_on:
+      - server
