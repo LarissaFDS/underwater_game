@@ -8,7 +8,7 @@ import { animals } from './data/animals'; //Importando a lista de animais
 //Inicialização do Express
 const app = express();
 app.use(cors());
-app.use(express.json()); //OBRIGATÓRIO: Permite que o Express entenda JSON enviado no corpo do POST
+app.use(express.json());
 
 //Criação do servidor HTTP (necessário para o Socket.IO)
 const server = http.createServer(app);
@@ -27,57 +27,41 @@ app.get('/', (req: Request, res: Response) => {
 });
 
 //=========================================================================
-//ROTAS REST API (TASK 2)
+//ROTAS REST API (TASK 2) - mantidas por compatibilidade
 //=========================================================================
 
-//GET /api/animals: Retorna os dados dos animais ocultando o nome (resposta)
 app.get('/api/animals', (req: Request, res: Response) => {
-  //Mapeia removendo o campo 'name' para segurança do client
   const sanitizedAnimals = animals.map(({ name, ...rest }) => rest);
   res.json(sanitizedAnimals);
 });
 
-//POST /api/puzzle/guess: Valida o palpite de letra do jogador
 app.post('/api/puzzle/guess', (req: Request, res: Response) => {
   const { animalId, letter } = req.body;
-
-  //Validação básica de payload
   if (!animalId || !letter || letter.length !== 1) {
-    return res.status(400).json({ error: 'Campos animalId e letter (1 caractere) são obrigatórios.' });
+    return res.status(400).json({ error: 'Campos animalId e letter são obrigatórios.' });
   }
 
-  //Busca o animal pelo ID
   const animal = animals.find(a => a.id === animalId);
-  if (!animal) {
-    return res.status(404).json({ error: 'Animal não encontrado.' });
-  }
+  if (!animal) return res.status(404).json({ error: 'Animal não encontrado.' });
 
   const positions: number[] = [];
   const nameLower = animal.name.toLowerCase();
   const letterLower = letter.toLowerCase();
 
-  //Percorre o nome encontrando todos os índices da letra digitada
   for (let i = 0; i < nameLower.length; i++) {
-    if (nameLower[i] === letterLower) {
-      positions.push(i);
-    }
+    if (nameLower[i] === letterLower) positions.push(i);
   }
 
-  //Critério de aceite: retorna se está correto e o array de posições encontradas
-  res.json({
-    correct: positions.length > 0,
-    positions
-  });
+  res.json({ correct: positions.length > 0, positions });
 });
 
 //=========================================================================
-//LÓGICA DE WEBSOCKETS / SALAS (TASK 1 e ISSUE 7 e ISSUE 9)
+//LÓGICA DE WEBSOCKETS / SALAS (TASKS 1, 7, 9 E 10)
 //=========================================================================
 
 const ROOM_NAME = 'ocean_room';
 const MAX_PLAYERS = 2;
 
-//Interface para controlar o estado dos animais na sala
 interface RoomAnimalState {
   id: string;
   x: number;
@@ -85,108 +69,177 @@ interface RoomAnimalState {
   discovered: boolean;
 }
 
-//Estado expandido da Sala
+//interface do jogador expandida
+interface RoomPlayerState {
+  id: string;
+  x: number;
+  y: number;
+  hearts: number;
+  oxygen: number;
+  deathCount: number;
+}
+
 const roomState = {
-  players: {} as Record<string, { id: string; x: number; y: number }>,
+  players: {} as Record<string, RoomPlayerState>,
   animals: {} as Record<string, RoomAnimalState>,
-  activePuzzleAnimalId: null as string | null //Bloqueia novos puzzles se não for null
+  activePuzzleAnimalId: null as string | null
 };
 
 io.on('connection', (socket: Socket) => {
   console.log(`${SocketEvents.PLAYER_JOIN} - ID: ${socket.id}`);
-
   const clientsInRoom = io.sockets.adapter.rooms.get(ROOM_NAME)?.size || 0;
 
   if (clientsInRoom >= MAX_PLAYERS) {
-    console.log(`Conexão rejeitada: sala cheia (${socket.id})`);
+    console.log(`Conexão rejeitada: Sala cheia (${socket.id})`);
     socket.emit(SocketEvents.ROOM_FULL, { error: 'A sala já está cheia.' });
     socket.disconnect();
     return;
   }
 
   socket.join(ROOM_NAME);
-  roomState.players[socket.id] = { id: socket.id, x: 0, y: 0 };
+  
+  //inicializa jogador com O2, vidas e contagem de mortes
+  roomState.players[socket.id] = { 
+    id: socket.id, x: 0, y: 0, hearts: 3, oxygen: 100, deathCount: 0 
+  };
 
-  //Quando o 2º jogador entra, inicializamos o mapa e os animais
   if (clientsInRoom + 1 === MAX_PLAYERS) {
     const mapSeed = Math.floor(Math.random() * 999999).toString();
     
-    //TAREFA BACKEND: Guardar lista de animais com posição fictícia inicial no mapa
-    //Distribuindo os animais em posições X diferentes para o frontend renderizar
     animals.forEach((animal, index) => {
       roomState.animals[animal.id] = {
-        id: animal.id,
-        x: 400 + index * 600, //Ex: 400, 1000, 1600...
-        y: 500,
-        discovered: false
+        id: animal.id, x: 400 + index * 600, y: 500, discovered: false
       };
     });
 
     console.log(`Sala cheia! Jogo iniciado. Animais posicionados.`);
-    
     io.to(ROOM_NAME).emit(SocketEvents.GAME_START, {
       seed: mapSeed,
       players: Object.keys(roomState.players)
     });
+    
+    //Envia o estado inicial para os jogadores assim que o jogo começa
+    io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
   }
 
+  //Função auxiliar: Checagem de morte/Game Over
+  const checkPlayerDeath = (playerId: string) => {
+    const player = roomState.players[playerId];
+    if (!player) return;
+
+    if (player.hearts <= 0 || player.oxygen <= 0) {
+      player.deathCount += 1;
+      
+      if (player.deathCount >= 2) {
+        //Morreu duas vezes: o outro jogador vence
+        console.log(`Game Over definitivo para ${playerId}`);
+        const winnerId = Object.keys(roomState.players).find(id => id !== playerId);
+        io.to(ROOM_NAME).emit(SocketEvents.GAME_OVER, { winner: winnerId });
+      } else {
+        //Primeira morte: reseta pro spawn e cancela puzzles ativos
+        console.log(`Primeira morte de ${playerId}. Voltando ao spawn.`);
+        player.hearts = 3;
+        player.oxygen = 100;
+        player.x = 0;
+        player.y = 0;
+        roomState.activePuzzleAnimalId = null; 
+        
+        io.to(ROOM_NAME).emit(SocketEvents.PLAYER_GAMEOVER, { playerId });
+        io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
+      }
+    }
+  };
+
+  //Movimentação
   socket.on(SocketEvents.PLAYER_MOVE, (data: { x: number, y: number }) => {
     if (roomState.players[socket.id]) {
       roomState.players[socket.id].x = data.x;
       roomState.players[socket.id].y = data.y;
-
       socket.to(ROOM_NAME).emit(SocketEvents.PLAYER_MOVED, {
-        id: socket.id,
-        x: data.x,
-        y: data.y
+        id: socket.id, x: data.x, y: data.y
       });
     }
   });
 
-  //=========================================================================
-  //NOVOS EVENTOS - ISSUE 9 (FORCA / PROXIMIDADE)
-  //=========================================================================
-
+  //Aproximação do animal
   socket.on(SocketEvents.ANIMAL_APPROACH, (data: { animalId: string }) => {
     const { animalId } = data;
-
-    //Bloquear se já houver um puzzle ativo na sala
-    if (roomState.activePuzzleAnimalId !== null) {
-      console.log(`Abordagem ignorada: Já existe um puzzle ativo (${roomState.activePuzzleAnimalId})`);
-      return;
-    }
+    if (roomState.activePuzzleAnimalId !== null) return;
 
     const roomAnimal = roomState.animals[animalId];
     const staticAnimalData = animals.find(a => a.id === animalId);
 
-    //Validações básicas de segurança
-    if (!roomAnimal || !staticAnimalData) {
-      console.log(`Animal não encontrado no servidor: ${animalId}`);
-      return;
-    }
+    if (!roomAnimal || !staticAnimalData || roomAnimal.discovered) return;
 
-    //Verifica se o animal já foi descoberto antes
-    if (roomAnimal.discovered) {
-      console.log(`Abordagem ignorada: O animal ${animalId} já foi descoberto.`);
-      return;
-    }
-
-    //Ativa o bloqueio de puzzle na sala
     roomState.activePuzzleAnimalId = animalId;
-    console.log(`Puzzle iniciado para o animal: ${animalId}`);
-
-    //Gera o hiddenName (substitui letras por '_', mas preserva hífens e espaços)
-    //Ex: "peixe-palhaço" vira ['_', '_', '_', '_', '_', '-', '_', '_', '_', '_', '_', '_', '_']
     const hiddenName = staticAnimalData.name
       .split('')
       .map(char => (char === '-' || char === ' ' ? char : '_'));
 
-    //Emitir puzzle:start para AMBOS os clients da sala com a primeira dica
     io.to(ROOM_NAME).emit(SocketEvents.PUZZLE_START, {
       animalId: animalId,
       hiddenName: hiddenName,
-      hint1: staticAnimalData.hints[0] //Primeira dica do array estático
+      hint1: staticAnimalData.hints[0]
     });
+  });
+
+  //=========================================================================
+  //NOVOS EVENTOS - DANO, OXIGÊNIO E PUZZLE EM TEMPO REAL
+  //=========================================================================
+
+  //Bateu em obstáculo
+  socket.on(SocketEvents.PLAYER_HIT, (data: { obstacleType: string }) => {
+    const player = roomState.players[socket.id];
+    if (player) {
+      player.hearts -= 1;
+      io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
+      checkPlayerDeath(socket.id);
+    }
+  });
+
+  //Chute de letra na forca
+  socket.on(SocketEvents.PUZZLE_GUESS, (data: { animalId: string, letter: string }) => {
+    const player = roomState.players[socket.id];
+    if (!player) return;
+
+    const animal = animals.find(a => a.id === data.animalId);
+    if (!animal || !data.letter) return;
+
+    const nameLower = animal.name.toLowerCase();
+    const letterLower = data.letter.toLowerCase();
+    const positions: number[] = [];
+
+    for (let i = 0; i < nameLower.length; i++) {
+      if (nameLower[i] === letterLower) positions.push(i);
+    }
+
+    //Se errou, tira 10% do O2 do jogador que chutou
+    if (positions.length === 0) {
+      player.oxygen -= 10;
+    }
+
+    io.to(ROOM_NAME).emit(SocketEvents.PUZZLE_RESULT, { 
+      correct: positions.length > 0, 
+      positions, 
+      letter: letterLower 
+    });
+    
+    io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
+    checkPlayerDeath(socket.id);
+  });
+
+  //Pedir dica
+  socket.on(SocketEvents.PUZZLE_HINT, (data: { animalId: string, hintIndex: number }) => {
+    const player = roomState.players[socket.id];
+    const animal = animals.find(a => a.id === data.animalId);
+    if (!player || !animal) return;
+
+    player.oxygen -= 5;
+    const nextHint = animal.hints[data.hintIndex] || "Sem mais dicas.";
+
+    socket.emit(SocketEvents.PUZZLE_HINT, { hint: nextHint });
+    io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
+    checkPlayerDeath(socket.id);
   });
 
   //=========================================================================
@@ -195,7 +248,6 @@ io.on('connection', (socket: Socket) => {
     console.log(`${SocketEvents.PLAYER_DISCONNECT} - ID: ${socket.id}`);
     delete roomState.players[socket.id];
     
-    //Se a sala esvaziar, limpa o estado do jogo
     if (Object.keys(roomState.players).length === 0) {
       roomState.animals = {};
       roomState.activePuzzleAnimalId = null;

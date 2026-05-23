@@ -6,5 +6,12 @@ export enum SocketEvents {
   GAME_START = 'game:start',
   ROOM_FULL = 'room:full',
   ANIMAL_APPROACH = 'animal:approach',
-  PUZZLE_START = 'puzzle:start'
+  PUZZLE_START = 'puzzle:start',
+  PLAYER_HIT = 'player:hit',
+  PUZZLE_GUESS = 'puzzle:guess',
+  PUZZLE_HINT = 'puzzle:hint',
+  PUZZLE_RESULT = 'puzzle:result',
+  PLAYER_GAMEOVER = 'player:gameover',
+  GAME_OVER = 'game:over',
+  STATE_UPDATE = 'state:update'
 }
