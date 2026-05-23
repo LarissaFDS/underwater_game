@@ -63,7 +63,7 @@ app.post('/api/puzzle/guess', (req: Request, res: Response) => {
     }
   }
 
-  //Critério de Aceite: Retorna se está correto e o array de posições encontradas
+  //Critério de aceite: retorna se está correto e o array de posições encontradas
   res.json({
     correct: positions.length > 0,
     positions
@@ -71,53 +71,70 @@ app.post('/api/puzzle/guess', (req: Request, res: Response) => {
 });
 
 //=========================================================================
-//LÓGICA DE WEBSOCKETS / SALAS (TASK 1 & ISSUE 7)
+//LÓGICA DE WEBSOCKETS / SALAS (TASK 1 e ISSUE 7 e ISSUE 9)
 //=========================================================================
 
 const ROOM_NAME = 'ocean_room';
 const MAX_PLAYERS = 2;
 
-//Guarda o estado de posição no servidor: { [socketId]: { id, x, y } }
-const gameState: Record<string, { id: string; x: number; y: number }> = {};
+//Interface para controlar o estado dos animais na sala
+interface RoomAnimalState {
+  id: string;
+  x: number;
+  y: number;
+  discovered: boolean;
+}
+
+//Estado expandido da Sala
+const roomState = {
+  players: {} as Record<string, { id: string; x: number; y: number }>,
+  animals: {} as Record<string, RoomAnimalState>,
+  activePuzzleAnimalId: null as string | null //Bloqueia novos puzzles se não for null
+};
 
 io.on('connection', (socket: Socket) => {
   console.log(`${SocketEvents.PLAYER_JOIN} - ID: ${socket.id}`);
 
-  //1. Verifica quantos jogadores já estão na sala
   const clientsInRoom = io.sockets.adapter.rooms.get(ROOM_NAME)?.size || 0;
 
-  //2. Bloqueia a terceira conexão
   if (clientsInRoom >= MAX_PLAYERS) {
-    console.log(`Conexão rejeitada: Sala cheia (${socket.id})`);
-    //Emite o evento de erro de sala cheia e desconecta o intruso
+    console.log(`Conexão rejeitada: sala cheia (${socket.id})`);
     socket.emit(SocketEvents.ROOM_FULL, { error: 'A sala já está cheia.' });
     socket.disconnect();
     return;
   }
 
-  //3. Adiciona o jogador à sala e inicializa seu estado em 0,0
   socket.join(ROOM_NAME);
-  gameState[socket.id] = { id: socket.id, x: 0, y: 0 };
+  roomState.players[socket.id] = { id: socket.id, x: 0, y: 0 };
 
-  //4. Se a sala atingiu 2 jogadores, emite o evento de início para todos
+  //Quando o 2º jogador entra, inicializamos o mapa e os animais
   if (clientsInRoom + 1 === MAX_PLAYERS) {
     const mapSeed = Math.floor(Math.random() * 999999).toString();
-    console.log(`Sala cheia! Iniciando jogo com seed: ${mapSeed}`);
+    
+    //TAREFA BACKEND: Guardar lista de animais com posição fictícia inicial no mapa
+    //Distribuindo os animais em posições X diferentes para o frontend renderizar
+    animals.forEach((animal, index) => {
+      roomState.animals[animal.id] = {
+        id: animal.id,
+        x: 400 + index * 600, //Ex: 400, 1000, 1600...
+        y: 500,
+        discovered: false
+      };
+    });
+
+    console.log(`Sala cheia! Jogo iniciado. Animais posicionados.`);
     
     io.to(ROOM_NAME).emit(SocketEvents.GAME_START, {
       seed: mapSeed,
-      players: Object.keys(gameState)
+      players: Object.keys(roomState.players)
     });
   }
 
-  //5. Escuta o evento de movimento do cliente local
   socket.on(SocketEvents.PLAYER_MOVE, (data: { x: number, y: number }) => {
-    //Atualiza o estado no servidor
-    if (gameState[socket.id]) {
-      gameState[socket.id].x = data.x;
-      gameState[socket.id].y = data.y;
+    if (roomState.players[socket.id]) {
+      roomState.players[socket.id].x = data.x;
+      roomState.players[socket.id].y = data.y;
 
-      //Repassa a nova posição apenas para o parceiro na mesma sala
       socket.to(ROOM_NAME).emit(SocketEvents.PLAYER_MOVED, {
         id: socket.id,
         x: data.x,
@@ -126,16 +143,66 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  //6. Limpeza na desconexão
+  //=========================================================================
+  //NOVOS EVENTOS - ISSUE 9 (FORCA / PROXIMIDADE)
+  //=========================================================================
+
+  socket.on(SocketEvents.ANIMAL_APPROACH, (data: { animalId: string }) => {
+    const { animalId } = data;
+
+    //Bloquear se já houver um puzzle ativo na sala
+    if (roomState.activePuzzleAnimalId !== null) {
+      console.log(`Abordagem ignorada: Já existe um puzzle ativo (${roomState.activePuzzleAnimalId})`);
+      return;
+    }
+
+    const roomAnimal = roomState.animals[animalId];
+    const staticAnimalData = animals.find(a => a.id === animalId);
+
+    //Validações básicas de segurança
+    if (!roomAnimal || !staticAnimalData) {
+      console.log(`Animal não encontrado no servidor: ${animalId}`);
+      return;
+    }
+
+    //Verifica se o animal já foi descoberto antes
+    if (roomAnimal.discovered) {
+      console.log(`Abordagem ignorada: O animal ${animalId} já foi descoberto.`);
+      return;
+    }
+
+    //Ativa o bloqueio de puzzle na sala
+    roomState.activePuzzleAnimalId = animalId;
+    console.log(`Puzzle iniciado para o animal: ${animalId}`);
+
+    //Gera o hiddenName (substitui letras por '_', mas preserva hífens e espaços)
+    //Ex: "peixe-palhaço" vira ['_', '_', '_', '_', '_', '-', '_', '_', '_', '_', '_', '_', '_']
+    const hiddenName = staticAnimalData.name
+      .split('')
+      .map(char => (char === '-' || char === ' ' ? char : '_'));
+
+    //Emitir puzzle:start para AMBOS os clients da sala com a primeira dica
+    io.to(ROOM_NAME).emit(SocketEvents.PUZZLE_START, {
+      animalId: animalId,
+      hiddenName: hiddenName,
+      hint1: staticAnimalData.hints[0] //Primeira dica do array estático
+    });
+  });
+
+  //=========================================================================
+
   socket.on('disconnect', () => {
     console.log(`${SocketEvents.PLAYER_DISCONNECT} - ID: ${socket.id}`);
-    delete gameState[socket.id];
+    delete roomState.players[socket.id];
+    
+    //Se a sala esvaziar, limpa o estado do jogo
+    if (Object.keys(roomState.players).length === 0) {
+      roomState.animals = {};
+      roomState.activePuzzleAnimalId = null;
+    }
   });
 });
 
-//=========================================================================
-
-//Definição da porta
 const PORT = process.env.PORT || 3001;
 
 server.listen(PORT, () => {
