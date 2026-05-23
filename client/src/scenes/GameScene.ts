@@ -1,10 +1,13 @@
 import Phaser from "phaser";
 import { PlayerSubmarine } from "../entities/PlayerSubmarine";
 import { MovementSystem } from "../systems/MovementSystem";
+import { HUD } from "../ui/HUD";
 
 export class GameScene extends Phaser.Scene {
   private player!: PlayerSubmarine;
   private movementSystem!: MovementSystem;
+  private localHud!: HUD;
+  private partnerHud!: HUD;
 
   constructor() {
     super("GameScene");
@@ -20,6 +23,27 @@ export class GameScene extends Phaser.Scene {
 
     this.cameras.main.setBounds(0, 0, 2400, 1600);
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
+
+    this.localHud = new HUD(this, 24, this.scale.height - 58);
+    // HUD do parceiro com escala menor 
+    const partnerHudScale = 0.85;
+    this.partnerHud = new HUD(
+    this,
+    this.scale.width - 24 - 200 * partnerHudScale,
+    this.scale.height - 58
+    );
+    this.partnerHud.setScale(partnerHudScale);
+    // TESTE DE ANIMAÇÃO DE OXIGÊNIO (Temporário enquanto o Backend não estiver pronto.)
+    // Isso será modificado depois, integração com o backend para atualizar o HUD de acordo com os dados do jogador
+    this.localHud.setOxygen(100);
+    this.localHud.setHearts(2);
+
+    this.time.delayedCall(1000, () => {
+    this.localHud.setOxygen(50);
+    });
+
+    this.partnerHud.setOxygen(100);
+    this.partnerHud.setHearts(3);
   }
 
   update(_time: number, delta: number): void {
