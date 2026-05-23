@@ -17,3 +17,8 @@ This is a project for a software engineering course.
     └── /types
         ├── Animal.ts
         └── GameState.ts
+```
+
+### Como rodar
+No terminal rode docker-compose up server
+Abra o navegador e acesse: http://localhost:3001
