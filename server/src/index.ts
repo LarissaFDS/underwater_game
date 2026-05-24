@@ -45,8 +45,8 @@ app.post('/api/puzzle/guess', (req: Request, res: Response) => {
   if (!animal) return res.status(404).json({ error: 'Animal não encontrado.' });
 
   const positions: number[] = [];
-  const nameLower = animal.name.toLowerCase();
-  const letterLower = letter.toLowerCase();
+  const nameLower = normalizeLetter(animal.name);
+  const letterLower = normalizeLetter(letter);
 
   for (let i = 0; i < nameLower.length; i++) {
     if (nameLower[i] === letterLower) positions.push(i);
@@ -61,6 +61,12 @@ app.post('/api/puzzle/guess', (req: Request, res: Response) => {
 
 const ROOM_NAME = 'ocean_room';
 const MAX_PLAYERS = 2;
+
+const normalizeLetter = (value: string): string =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 
 interface RoomAnimalState {
   id: string;
@@ -82,7 +88,24 @@ interface RoomPlayerState {
 const roomState = {
   players: {} as Record<string, RoomPlayerState>,
   animals: {} as Record<string, RoomAnimalState>,
-  activePuzzleAnimalId: null as string | null
+  activePuzzleAnimalId: null as string | null,
+  puzzleEndConfirmations: new Set<string>()
+};
+
+const clearActivePuzzle = () => {
+  roomState.activePuzzleAnimalId = null;
+  roomState.puzzleEndConfirmations.clear();
+};
+
+const allCurrentPlayersEndedPuzzle = () => {
+  const currentPlayerIds = Object.keys(roomState.players);
+
+  return (
+    currentPlayerIds.length > 0 &&
+    currentPlayerIds.every((playerId) =>
+      roomState.puzzleEndConfirmations.has(playerId)
+    )
+  );
 };
 
 io.on('connection', (socket: Socket) => {
@@ -142,7 +165,7 @@ io.on('connection', (socket: Socket) => {
         player.oxygen = 100;
         player.x = 0;
         player.y = 0;
-        roomState.activePuzzleAnimalId = null; 
+        clearActivePuzzle(); 
         
         io.to(ROOM_NAME).emit(SocketEvents.PLAYER_GAMEOVER, { playerId });
         io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
@@ -172,6 +195,7 @@ io.on('connection', (socket: Socket) => {
     if (!roomAnimal || !staticAnimalData || roomAnimal.discovered) return;
 
     roomState.activePuzzleAnimalId = animalId;
+    roomState.puzzleEndConfirmations.clear();
     const hiddenName = staticAnimalData.name
       .split('')
       .map(char => (char === '-' || char === ' ' ? char : '_'));
@@ -181,6 +205,17 @@ io.on('connection', (socket: Socket) => {
       hiddenName: hiddenName,
       hint1: staticAnimalData.hints[0]
     });
+  });
+
+  socket.on(SocketEvents.PUZZLE_END, (data: { animalId?: string }) => {
+    if (!roomState.activePuzzleAnimalId) return;
+    if (data?.animalId !== roomState.activePuzzleAnimalId) return;
+
+    roomState.puzzleEndConfirmations.add(socket.id);
+
+    if (allCurrentPlayersEndedPuzzle()) {
+      clearActivePuzzle();
+    }
   });
 
   //=========================================================================
@@ -205,8 +240,8 @@ io.on('connection', (socket: Socket) => {
     const animal = animals.find(a => a.id === data.animalId);
     if (!animal || !data.letter) return;
 
-    const nameLower = animal.name.toLowerCase();
-    const letterLower = data.letter.toLowerCase();
+    const nameLower = normalizeLetter(animal.name);
+    const letterLower = normalizeLetter(data.letter);
     const positions: number[] = [];
 
     for (let i = 0; i < nameLower.length; i++) {
@@ -234,9 +269,14 @@ io.on('connection', (socket: Socket) => {
     const animal = animals.find(a => a.id === data.animalId);
     if (!player || !animal) return;
 
-    player.oxygen -= 5;
-    const nextHint = animal.hints[data.hintIndex] || "Sem mais dicas.";
+    const nextHint = animal.hints[data.hintIndex];
 
+    if (!nextHint) {
+      socket.emit(SocketEvents.PUZZLE_HINT, { hint: "Sem mais dicas." });
+      return;
+    }
+
+    player.oxygen -= 5;
     socket.emit(SocketEvents.PUZZLE_HINT, { hint: nextHint });
     io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
     checkPlayerDeath(socket.id);
@@ -247,10 +287,16 @@ io.on('connection', (socket: Socket) => {
   socket.on('disconnect', () => {
     console.log(`${SocketEvents.PLAYER_DISCONNECT} - ID: ${socket.id}`);
     delete roomState.players[socket.id];
+    roomState.puzzleEndConfirmations.delete(socket.id);
     
     if (Object.keys(roomState.players).length === 0) {
       roomState.animals = {};
-      roomState.activePuzzleAnimalId = null;
+      clearActivePuzzle();
+    } else if (
+      roomState.activePuzzleAnimalId &&
+      allCurrentPlayersEndedPuzzle()
+    ) {
+      clearActivePuzzle();
     }
   });
 });
