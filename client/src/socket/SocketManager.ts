@@ -113,6 +113,8 @@ interface ClientToServerEvents {
 export class SocketManager {
   private static instance: SocketManager;
   private socket?: Socket<ServerToClientEvents, ClientToServerEvents>;
+  private lastStateUpdate?: StateUpdatePayload;
+  private isStateCacheBound = false;
 
   private constructor() {}
 
@@ -127,8 +129,10 @@ export class SocketManager {
   public connect(): Socket<ServerToClientEvents, ClientToServerEvents> {
     if (!this.socket) {
       this.socket = io(this.getServerUrl());
+      this.bindStateCache();
     } else if (!this.socket.connected) {
       this.socket.connect();
+      this.bindStateCache();
     }
 
     return this.socket;
@@ -138,6 +142,10 @@ export class SocketManager {
     | Socket<ServerToClientEvents, ClientToServerEvents>
     | undefined {
     return this.socket;
+  }
+
+  public get currentState(): StateUpdatePayload | undefined {
+    return this.lastStateUpdate;
   }
 
   public emitPlayerMove(payload: PlayerMovePayload): void {
@@ -204,8 +212,12 @@ export class SocketManager {
 
   public onStateUpdate(handler: (payload: StateUpdatePayload) => void): () => void {
     const socket = this.connect();
-    socket.on("state:update", handler);
-    return () => socket.off("state:update", handler);
+    const wrappedHandler = (payload: StateUpdatePayload): void => {
+      this.lastStateUpdate = payload;
+      handler(payload);
+    };
+    socket.on("state:update", wrappedHandler);
+    return () => socket.off("state:update", wrappedHandler);
   }
 
   public onPlayerGameOver(
@@ -232,6 +244,17 @@ export class SocketManager {
     `http://${window.location.hostname}:3001` // teste para computadores diferentes na mesma rede local
   );
 
+  }
+
+  private bindStateCache(): void {
+    if (!this.socket || this.isStateCacheBound) {
+      return;
+    }
+
+    this.socket.on("state:update", (payload) => {
+      this.lastStateUpdate = payload;
+    });
+    this.isStateCacheBound = true;
   }
 }
 

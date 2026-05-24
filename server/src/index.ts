@@ -45,8 +45,8 @@ app.post('/api/puzzle/guess', (req: Request, res: Response) => {
   if (!animal) return res.status(404).json({ error: 'Animal não encontrado.' });
 
   const positions: number[] = [];
-  const nameLower = animal.name.toLowerCase();
-  const letterLower = letter.toLowerCase();
+  const nameLower = normalizeLetter(animal.name);
+  const letterLower = normalizeLetter(letter);
 
   for (let i = 0; i < nameLower.length; i++) {
     if (nameLower[i] === letterLower) positions.push(i);
@@ -61,6 +61,12 @@ app.post('/api/puzzle/guess', (req: Request, res: Response) => {
 
 const ROOM_NAME = 'ocean_room';
 const MAX_PLAYERS = 2;
+
+const normalizeLetter = (value: string): string =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 
 interface RoomAnimalState {
   id: string;
@@ -234,8 +240,8 @@ io.on('connection', (socket: Socket) => {
     const animal = animals.find(a => a.id === data.animalId);
     if (!animal || !data.letter) return;
 
-    const nameLower = animal.name.toLowerCase();
-    const letterLower = data.letter.toLowerCase();
+    const nameLower = normalizeLetter(animal.name);
+    const letterLower = normalizeLetter(data.letter);
     const positions: number[] = [];
 
     for (let i = 0; i < nameLower.length; i++) {
@@ -263,9 +269,14 @@ io.on('connection', (socket: Socket) => {
     const animal = animals.find(a => a.id === data.animalId);
     if (!player || !animal) return;
 
-    player.oxygen -= 5;
-    const nextHint = animal.hints[data.hintIndex] || "Sem mais dicas.";
+    const nextHint = animal.hints[data.hintIndex];
 
+    if (!nextHint) {
+      socket.emit(SocketEvents.PUZZLE_HINT, { hint: "Sem mais dicas." });
+      return;
+    }
+
+    player.oxygen -= 5;
     socket.emit(SocketEvents.PUZZLE_HINT, { hint: nextHint });
     io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
     checkPlayerDeath(socket.id);

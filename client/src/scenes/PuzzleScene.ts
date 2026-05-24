@@ -24,8 +24,12 @@ export class PuzzleScene extends Phaser.Scene {
   private nextHintIndex = 1;
   private oxygen = 100;
   private isClosing = false;
+  private isHintPending = false;
+  private hasNoMoreHints = false;
+  private oxygenBeforeHint?: number;
   private unsubscribeSocketEvents: Array<() => void> = [];
 
+  private panelContainer!: Phaser.GameObjects.Container;
   private panel!: Phaser.GameObjects.Rectangle;
   private flashOverlay!: Phaser.GameObjects.Rectangle;
   private wordContainer!: Phaser.GameObjects.Container;
@@ -35,6 +39,8 @@ export class PuzzleScene extends Phaser.Scene {
   private oxygenText!: Phaser.GameObjects.Text;
   private oxygenFill!: Phaser.GameObjects.Rectangle;
   private waterFill!: Phaser.GameObjects.Rectangle;
+  private hintButton!: Phaser.GameObjects.Rectangle;
+  private hintButtonLabel!: Phaser.GameObjects.Text;
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
@@ -42,11 +48,13 @@ export class PuzzleScene extends Phaser.Scene {
       return;
     }
 
-    if (!/^[a-z]$/i.test(event.key)) {
+    const letter = this.normalizeLetter(event.key);
+
+    if (!/^[a-z]$/.test(letter)) {
       return;
     }
 
-    this.submitLetter(event.key.toLowerCase());
+    this.submitLetter(letter);
   };
 
   constructor() {
@@ -61,15 +69,18 @@ export class PuzzleScene extends Phaser.Scene {
     this.attemptedLetters.clear();
     this.hints.splice(0, this.hints.length, data.hint1);
     this.nextHintIndex = 1;
-    this.oxygen = 100;
+    this.oxygen = this.getInitialOxygen();
     this.isClosing = false;
+    this.isHintPending = false;
+    this.hasNoMoreHints = false;
+    this.oxygenBeforeHint = undefined;
   }
 
   create(): void {
     const { width, height } = this.scale;
 
     this.add
-      .rectangle(0, 0, width, height, 0x020617, 0.82)
+      .rectangle(0, 0, width, height, 0x020617, 0.68)
       .setOrigin(0)
       .setScrollFactor(0);
 
@@ -79,6 +90,7 @@ export class PuzzleScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(20);
 
+    this.panelContainer = this.add.container(0, 0);
     this.createPanel(width, height);
     this.createSubmarineStatus(width, height);
     this.createPuzzleContent(width, height);
@@ -101,51 +113,63 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private createPanel(width: number, height: number): void {
-    this.panel = this.add
-      .rectangle(width / 2, height / 2, 980, 560, 0x071827, 0.94)
-      .setStrokeStyle(3, 0x94a3b8, 0.9);
+    this.panel = this.add.rectangle(width / 2, height / 2, 980, 560, 0x11133a, 0.88);
+    this.panel.setStrokeStyle(3, 0x67e8f9, 0.78);
+    this.panelContainer.add(this.panel);
 
-    this.add
+    const title = this.add
       .text(width / 2, height / 2 - 238, "Forca submarina", {
         fontSize: "34px",
         color: "#f8fafc",
       })
       .setOrigin(0.5);
+    this.panelContainer.add(title);
 
-    this.add
+    const closeText = this.add
       .text(width / 2, height / 2 + 244, "ESC fecha temporariamente para teste", {
         fontSize: "15px",
         color: "#94a3b8",
       })
       .setOrigin(0.5);
+    this.panelContainer.add(closeText);
   }
 
   private createSubmarineStatus(width: number, height: number): void {
     const leftX = width / 2 - 360;
     const centerY = height / 2;
 
-    this.add
-      .ellipse(leftX, centerY - 46, 190, 128, 0x0f172a, 1)
+    const hull = this.add
+      .ellipse(leftX, centerY - 48, 210, 132, 0x172554, 1)
       .setStrokeStyle(3, 0x94a3b8, 0.8);
-    this.add.rectangle(leftX + 80, centerY - 46, 44, 72, 0x071827, 1);
-    this.add.circle(leftX - 38, centerY - 54, 22, 0x38bdf8, 0.22);
+    const nose = this.add
+      .ellipse(leftX + 86, centerY - 48, 64, 98, 0x0f172a, 1)
+      .setStrokeStyle(2, 0x67e8f9, 0.45);
+    const rearRing = this.add
+      .ellipse(leftX - 84, centerY - 48, 34, 92, 0x020617, 1)
+      .setStrokeStyle(2, 0x67e8f9, 0.35);
+    const viewport = this.add
+      .circle(leftX - 42, centerY - 58, 27, 0x082f49, 1)
+      .setStrokeStyle(3, 0x67e8f9, 0.85);
+    const viewportGlow = this.add.circle(leftX - 48, centerY - 64, 9, 0x7dd3fc, 0.36);
 
     this.waterFill = this.add
-      .rectangle(leftX, centerY + 14, 150, 1, 0x0ea5e9, 0.55)
+      .rectangle(leftX + 8, centerY + 10, 146, 1, 0x0ea5e9, 0.62)
       .setOrigin(0.5, 1);
 
-    this.add
-      .rectangle(leftX, centerY - 46, 150, 104, 0xffffff, 0)
-      .setStrokeStyle(2, 0x38bdf8, 0.45);
+    const chamber = this.add
+      .rectangle(leftX + 8, centerY - 48, 146, 112, 0xffffff, 0)
+      .setStrokeStyle(2, 0x38bdf8, 0.52);
+    const chamberTop = this.add.rectangle(leftX + 8, centerY - 104, 120, 6, 0x67e8f9, 0.24);
+    const chamberBottom = this.add.rectangle(leftX + 8, centerY + 10, 120, 6, 0x67e8f9, 0.18);
 
-    this.add
+    const label = this.add
       .text(leftX, centerY + 60, "COMPARTIMENTO", {
         fontSize: "13px",
         color: "#cbd5e1",
       })
       .setOrigin(0.5);
 
-    this.add
+    const o2Track = this.add
       .rectangle(leftX, centerY + 124, 176, 20, 0x020617, 1)
       .setStrokeStyle(2, 0x94a3b8, 0.8);
     this.oxygenFill = this.add
@@ -158,28 +182,53 @@ export class PuzzleScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    this.panelContainer.add([
+      hull,
+      nose,
+      rearRing,
+      viewport,
+      viewportGlow,
+      this.waterFill,
+      chamber,
+      chamberTop,
+      chamberBottom,
+      label,
+      o2Track,
+      this.oxygenFill,
+      this.oxygenText,
+    ]);
+
     this.updateOxygenVisuals();
   }
 
   private createPuzzleContent(width: number, height: number): void {
     this.wordContainer = this.add.container(width / 2 + 90, height / 2 - 92);
     this.renderWord();
+    this.panelContainer.add(this.wordContainer);
+
+    const hintBox = this.add
+      .rectangle(width / 2 + 90, height / 2 - 4, 590, 116, 0x020617, 0.58)
+      .setStrokeStyle(2, 0x475569, 0.72);
+    this.panelContainer.add(hintBox);
 
     this.hintText = this.add
-      .text(width / 2 + 90, height / 2 - 8, this.formatHints(), {
-        fontSize: "20px",
+      .text(width / 2 + 90, height / 2 - 4, this.formatHints(), {
+        fontSize: "17px",
         color: "#facc15",
-        align: "center",
-        wordWrap: { width: 560 },
+        align: "left",
+        lineSpacing: 4,
+        wordWrap: { width: 540 },
       })
       .setOrigin(0.5);
+    this.panelContainer.add(this.hintText);
 
-    this.add
+    const promptText = this.add
       .text(width / 2 + 90, height / 2 + 80, "Digite uma letra", {
         fontSize: "22px",
         color: "#e2e8f0",
       })
       .setOrigin(0.5);
+    this.panelContainer.add(promptText);
 
     this.attemptsText = this.add
       .text(width / 2 + 90, height / 2 + 124, "Tentativas: -", {
@@ -187,6 +236,7 @@ export class PuzzleScene extends Phaser.Scene {
         color: "#cbd5e1",
       })
       .setOrigin(0.5);
+    this.panelContainer.add(this.attemptsText);
 
     this.feedbackText = this.add
       .text(width / 2 + 90, height / 2 + 166, "Aguardando letra...", {
@@ -194,24 +244,26 @@ export class PuzzleScene extends Phaser.Scene {
         color: "#94a3b8",
       })
       .setOrigin(0.5);
+    this.panelContainer.add(this.feedbackText);
   }
 
   private createHintButton(width: number, height: number): void {
     const buttonX = width / 2 + 90;
     const buttonY = height / 2 + 214;
-    const button = this.add
-      .rectangle(buttonX, buttonY, 180, 44, 0xfacc15, 0.95)
+    this.hintButton = this.add
+      .rectangle(buttonX, buttonY, 180, 44, 0xfacc15, 0.96)
       .setStrokeStyle(2, 0xfef9c3, 0.9)
       .setInteractive({ useHandCursor: true });
 
-    this.add
+    this.hintButtonLabel = this.add
       .text(buttonX, buttonY, "Pedir dica", {
         fontSize: "20px",
         color: "#0f172a",
       })
       .setOrigin(0.5);
 
-    button.on("pointerdown", () => this.requestHint());
+    this.panelContainer.add([this.hintButton, this.hintButtonLabel]);
+    this.hintButton.on("pointerdown", () => this.requestHint());
   }
 
   private submitLetter(letter: string): void {
@@ -226,11 +278,13 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private requestHint(): void {
-    if (!this.animalId) {
+    if (!this.animalId || this.isHintPending || this.hasNoMoreHints) {
       return;
     }
 
-    this.applyOxygenDelta(-5);
+    this.isHintPending = true;
+    this.oxygenBeforeHint = this.oxygen;
+    this.updateHintButtonState();
     this.setFeedback("Dica solicitada", 0xfacc15);
     socketManager.emitPuzzleHint({
       animalId: this.animalId,
@@ -264,14 +318,32 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private handlePuzzleHint(payload: PuzzleHintPayload): void {
+    this.isHintPending = false;
+
     if (payload.hint) {
-      this.hints.push(payload.hint);
+      if (this.isNoMoreHintsMessage(payload.hint)) {
+        this.hasNoMoreHints = true;
+        if (!this.hints.some((hint) => this.isNoMoreHintsMessage(hint))) {
+          this.hints.push("Sem mais dicas");
+        }
+      } else if (!this.hints.includes(payload.hint)) {
+        this.hints.push(payload.hint);
+        if (
+          typeof payload.oxygen !== "number" &&
+          this.oxygen === this.oxygenBeforeHint
+        ) {
+          this.applyOxygenDelta(-5);
+        }
+      }
       this.hintText.setText(this.formatHints());
     }
 
     if (typeof payload.oxygen === "number") {
       this.setOxygen(payload.oxygen);
     }
+
+    this.updateHintButtonState();
+    this.oxygenBeforeHint = undefined;
   }
 
   private handleStateUpdate(payload: StateUpdatePayload): void {
@@ -282,6 +354,24 @@ export class PuzzleScene extends Phaser.Scene {
     if (oxygenValues.length > 0) {
       this.setOxygen(Math.min(...oxygenValues));
     }
+  }
+
+  private getInitialOxygen(): number {
+    const state = socketManager.currentState;
+    const localPlayerId = socketManager.currentSocket?.id;
+    const localOxygen = localPlayerId ? state?.[localPlayerId]?.oxygen : undefined;
+
+    if (typeof localOxygen === "number") {
+      return Phaser.Math.Clamp(localOxygen, 0, 100);
+    }
+
+    const oxygenValues = Object.values(state ?? {})
+      .map((player) => player.oxygen)
+      .filter((oxygen) => Number.isFinite(oxygen));
+
+    return oxygenValues.length > 0
+      ? Phaser.Math.Clamp(Math.min(...oxygenValues), 0, 100)
+      : 100;
   }
 
   private revealLetter(letter: string, positions: number[]): void {
@@ -393,10 +483,54 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private formatHints(): string {
-    return this.hints
+    const uniqueHints = this.hints
       .filter((hint) => hint.length > 0)
-      .map((hint, index) => `Dica ${index + 1}: ${hint}`)
+      .filter((hint, index, allHints) => allHints.indexOf(hint) === index);
+    const visibleHints = uniqueHints.slice(-3);
+    const hiddenCount = uniqueHints.length - visibleHints.length;
+    const prefix = hiddenCount > 0 ? [`+${hiddenCount} dica(s) anterior(es)`] : [];
+
+    return [...prefix, ...visibleHints]
+      .map((hint, index) => {
+        if (hint.startsWith("+")) {
+          return hint;
+        }
+
+        const visibleIndex = prefix.length > 0 ? index - 1 : index;
+        return `Dica ${hiddenCount + visibleIndex + 1}: ${hint}`;
+      })
       .join("\n");
+  }
+
+  private isNoMoreHintsMessage(hint: string): boolean {
+    return this.normalizeText(hint).includes("sem mais dicas");
+  }
+
+  private normalizeText(value: string): string {
+    return value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  }
+
+  private normalizeLetter(value: string): string {
+    return this.normalizeText(value).charAt(0);
+  }
+
+  private updateHintButtonState(): void {
+    const isDisabled = this.isHintPending || this.hasNoMoreHints;
+    this.hintButton.disableInteractive();
+
+    if (!isDisabled) {
+      this.hintButton.setInteractive({ useHandCursor: true });
+    }
+
+    this.hintButton.setFillStyle(
+      isDisabled ? 0x64748b : 0xfacc15,
+      isDisabled ? 0.72 : 0.96
+    );
+    this.hintButtonLabel.setText(this.hasNoMoreHints ? "Sem dicas" : "Pedir dica");
+    this.hintButtonLabel.setColor(isDisabled ? "#cbd5e1" : "#0f172a");
   }
 
   private updateAttemptsText(): void {
@@ -416,6 +550,7 @@ export class PuzzleScene extends Phaser.Scene {
   private flashError(): void {
     this.flashOverlay.setAlpha(0.36);
     this.panel.setStrokeStyle(4, 0xef4444, 1);
+    this.shakePanel();
 
     this.tweens.add({
       targets: this.flashOverlay,
@@ -425,6 +560,21 @@ export class PuzzleScene extends Phaser.Scene {
     });
     this.time.delayedCall(280, () => {
       this.panel.setStrokeStyle(3, 0x94a3b8, 0.9);
+    });
+  }
+
+  private shakePanel(): void {
+    this.tweens.killTweensOf(this.panelContainer);
+    this.panelContainer.setPosition(0, 0);
+    this.tweens.add({
+      targets: this.panelContainer,
+      x: { from: -8, to: 0 },
+      y: { from: 3, to: 0 },
+      duration: 42,
+      repeat: 4,
+      yoyo: true,
+      ease: "Sine.InOut",
+      onComplete: () => this.panelContainer.setPosition(0, 0),
     });
   }
 
