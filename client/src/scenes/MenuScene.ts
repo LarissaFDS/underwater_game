@@ -1,32 +1,57 @@
 import Phaser from "phaser";
+import {
+  socketManager,
+  type GameStartPayload,
+  type RoomFullPayload,
+} from "../socket/SocketManager";
 
 export class MenuScene extends Phaser.Scene {
+  private unsubscribeSocketEvents: Array<() => void> = [];
+  private roomIsFull = false;
+
   constructor() {
     super("MenuScene");
   }
 
   create(): void {
+    this.roomIsFull = false;
     this.cameras.main.setBackgroundColor("#0a1628");
 
-    this.add.text(640, 260, "Aguardando segundo jogador...", {
-      fontSize: "32px",
-      color: "#ffffff",
-    }).setOrigin(0.5);
+    const statusText = this.add
+      .text(640, 260, "Aguardando segundo jogador...", {
+        fontSize: "32px",
+        color: "#ffffff",
+      })
+      .setOrigin(0.5);
 
-    const startText = this.add.text(640, 360, "Iniciar", {
-      fontSize: "28px",
-      color: "#00ffcc",
-      backgroundColor: "#102a44",
-      padding: {
-        x: 20,
-        y: 10,
-      },
-    }).setOrigin(0.5);
+    socketManager.connect();
 
-    startText.setInteractive({ useHandCursor: true });
+    this.unsubscribeSocketEvents.push(
+      socketManager.onGameStart((payload: GameStartPayload) => {
+        if (this.roomIsFull) {
+          return;
+        }
 
-    startText.on("pointerdown", () => {
-      this.scene.start("GameScene");
+        this.scene.start("GameScene", payload);
+      }),
+      socketManager.onRoomFull((payload?: RoomFullPayload) => {
+        this.roomIsFull = true;
+        statusText.setText(this.getRoomFullMessage(payload));
+        statusText.setColor("#ffb4b4");
+      })
+    );
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.unsubscribeSocketEvents.forEach((unsubscribe) => unsubscribe());
+      this.unsubscribeSocketEvents = [];
     });
+  }
+
+  private getRoomFullMessage(payload?: RoomFullPayload): string {
+    if (typeof payload === "string") {
+      return payload;
+    }
+
+    return payload?.message ?? "Sala cheia. Tente novamente mais tarde.";
   }
 }
