@@ -1,11 +1,19 @@
 import Phaser from "phaser";
+import {
+  DEPTH_OVERLAY_MAX_ALPHA,
+  MAP_HEIGHT,
+  MAP_WIDTH,
+} from "../data/mapConfig";
 import { PlayerSubmarine } from "../entities/PlayerSubmarine";
+import { MapGenerationSystem } from "../systems/MapGenerationSystem";
 import { MovementSystem } from "../systems/MovementSystem";
 import { HUD } from "../ui/HUD";
 
 export class GameScene extends Phaser.Scene {
   private player!: PlayerSubmarine;
   private movementSystem!: MovementSystem;
+  private mapGenerationSystem!: MapGenerationSystem;
+  private depthOverlay!: Phaser.GameObjects.Rectangle;
   private localHud!: HUD;
   private partnerHud!: HUD;
 
@@ -15,13 +23,24 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     this.cameras.main.setBackgroundColor("#0a1628");
+    this.mapGenerationSystem = new MapGenerationSystem(this);
+    
+    const storedSeed = sessionStorage.getItem("mapSeed");
+    const mapSeed = storedSeed ? Number(storedSeed) : Date.now();
 
-    this.createWorld();
+    sessionStorage.setItem("mapSeed", String(mapSeed));
+   
+    // Teste de seeds fixas para ver se o mapa se mantém
+    //const mapSeed = 12345;
+    //const mapSeed = 67890;
+    this.mapGenerationSystem.generate(mapSeed);
 
-    this.player = new PlayerSubmarine(this, 1200, 800);
+    this.createDepthOverlay();
+
+    this.player = new PlayerSubmarine(this, MAP_WIDTH / 2, MAP_HEIGHT / 2);
     this.movementSystem = new MovementSystem();
 
-    this.cameras.main.setBounds(0, 0, 2400, 1600);
+    this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
     this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
 
     this.localHud = new HUD(this, 24, this.scale.height - 58);
@@ -56,22 +75,35 @@ export class GameScene extends Phaser.Scene {
       worldPoint.y,
       delta
     );
+
+    this.player.x = Phaser.Math.Clamp(this.player.x, 0, MAP_WIDTH);
+    this.player.y = Phaser.Math.Clamp(this.player.y, 0, MAP_HEIGHT);
+    this.updateDepthOverlay();
   }
 
-  private createWorld(): void {
-    const graphics = this.add.graphics();
+  private createDepthOverlay(): void {
+    this.depthOverlay = this.add.rectangle(
+      0,
+      0,
+      this.scale.width,
+      this.scale.height,
+      0x000000,
+      1
+    );
+    this.depthOverlay.setOrigin(0, 0);
+    this.depthOverlay.setAlpha(0);
+    this.depthOverlay.setScrollFactor(0);
+    this.depthOverlay.setDepth(900);
+  }
 
-    graphics.fillStyle(0x0a1628, 1);
-    graphics.fillRect(0, 0, 2400, 1600);
-
-    graphics.lineStyle(2, 0x123456, 0.5);
-
-    for (let x = 0; x <= 2400; x += 120) {
-      graphics.lineBetween(x, 0, x, 1600);
-    }
-
-    for (let y = 0; y <= 1600; y += 120) {
-      graphics.lineBetween(0, y, 2400, y);
-    }
+  private updateDepthOverlay(): void {
+    const depthStart = 800;
+    const depthRange = 500;
+    const depthProgress = Phaser.Math.Clamp(
+      (this.player.y - depthStart) / depthRange,
+      0,
+      1
+    );
+    this.depthOverlay.setAlpha(depthProgress * DEPTH_OVERLAY_MAX_ALPHA);
   }
 }
