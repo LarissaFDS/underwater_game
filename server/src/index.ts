@@ -82,7 +82,24 @@ interface RoomPlayerState {
 const roomState = {
   players: {} as Record<string, RoomPlayerState>,
   animals: {} as Record<string, RoomAnimalState>,
-  activePuzzleAnimalId: null as string | null
+  activePuzzleAnimalId: null as string | null,
+  puzzleEndConfirmations: new Set<string>()
+};
+
+const clearActivePuzzle = () => {
+  roomState.activePuzzleAnimalId = null;
+  roomState.puzzleEndConfirmations.clear();
+};
+
+const allCurrentPlayersEndedPuzzle = () => {
+  const currentPlayerIds = Object.keys(roomState.players);
+
+  return (
+    currentPlayerIds.length > 0 &&
+    currentPlayerIds.every((playerId) =>
+      roomState.puzzleEndConfirmations.has(playerId)
+    )
+  );
 };
 
 io.on('connection', (socket: Socket) => {
@@ -142,7 +159,7 @@ io.on('connection', (socket: Socket) => {
         player.oxygen = 100;
         player.x = 0;
         player.y = 0;
-        roomState.activePuzzleAnimalId = null; 
+        clearActivePuzzle(); 
         
         io.to(ROOM_NAME).emit(SocketEvents.PLAYER_GAMEOVER, { playerId });
         io.to(ROOM_NAME).emit(SocketEvents.STATE_UPDATE, roomState.players);
@@ -172,6 +189,7 @@ io.on('connection', (socket: Socket) => {
     if (!roomAnimal || !staticAnimalData || roomAnimal.discovered) return;
 
     roomState.activePuzzleAnimalId = animalId;
+    roomState.puzzleEndConfirmations.clear();
     const hiddenName = staticAnimalData.name
       .split('')
       .map(char => (char === '-' || char === ' ' ? char : '_'));
@@ -181,6 +199,17 @@ io.on('connection', (socket: Socket) => {
       hiddenName: hiddenName,
       hint1: staticAnimalData.hints[0]
     });
+  });
+
+  socket.on(SocketEvents.PUZZLE_END, (data: { animalId?: string }) => {
+    if (!roomState.activePuzzleAnimalId) return;
+    if (data?.animalId !== roomState.activePuzzleAnimalId) return;
+
+    roomState.puzzleEndConfirmations.add(socket.id);
+
+    if (allCurrentPlayersEndedPuzzle()) {
+      clearActivePuzzle();
+    }
   });
 
   //=========================================================================
@@ -247,10 +276,16 @@ io.on('connection', (socket: Socket) => {
   socket.on('disconnect', () => {
     console.log(`${SocketEvents.PLAYER_DISCONNECT} - ID: ${socket.id}`);
     delete roomState.players[socket.id];
+    roomState.puzzleEndConfirmations.delete(socket.id);
     
     if (Object.keys(roomState.players).length === 0) {
       roomState.animals = {};
-      roomState.activePuzzleAnimalId = null;
+      clearActivePuzzle();
+    } else if (
+      roomState.activePuzzleAnimalId &&
+      allCurrentPlayersEndedPuzzle()
+    ) {
+      clearActivePuzzle();
     }
   });
 });

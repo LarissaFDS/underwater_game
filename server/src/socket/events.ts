@@ -7,6 +7,7 @@ export enum SocketEvents {
   ROOM_FULL = 'room:full',
   ANIMAL_APPROACH = 'animal:approach',
   PUZZLE_START = 'puzzle:start',
+  PUZZLE_END = 'puzzle:end',
   PLAYER_HIT = 'player:hit',
   PUZZLE_GUESS = 'puzzle:guess',
   PUZZLE_HINT = 'puzzle:hint',

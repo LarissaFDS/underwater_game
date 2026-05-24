@@ -45,17 +45,69 @@ export interface PuzzleEndPayload {
   animalId: string;
 }
 
+export interface PuzzleGuessPayload {
+  animalId: string;
+  letter: string;
+}
+
+export interface PuzzleHintRequestPayload {
+  animalId: string;
+  hintIndex: number;
+}
+
+export interface PuzzleHintPayload {
+  hint?: string;
+  oxygen?: number;
+}
+
+export interface PuzzleResultPayload {
+  correct: boolean;
+  positions: number[];
+  letter: string;
+  hiddenName?: string | string[];
+  hidden_name?: string | string[];
+  maskedName?: string | string[];
+  nameMask?: string | string[];
+  oxygen?: number;
+}
+
+export interface PlayerStatePayload {
+  id: string;
+  x: number;
+  y: number;
+  hearts: number;
+  oxygen: number;
+  deathCount?: number;
+}
+
+export type StateUpdatePayload = Record<string, PlayerStatePayload>;
+
+export interface PlayerGameOverPayload {
+  playerId: string;
+}
+
+export interface GameOverPayload {
+  winner?: string;
+}
+
 interface ServerToClientEvents {
   "player:moved": (payload: PlayerMovedPayload) => void;
   "game:start": (payload: GameStartPayload) => void;
   "room:full": (payload?: RoomFullPayload) => void;
   "puzzle:start": (payload: PuzzleStartPayload) => void;
+  "puzzle:result": (payload: PuzzleResultPayload) => void;
+  "puzzle:hint": (payload: PuzzleHintPayload) => void;
+  "state:update": (payload: StateUpdatePayload) => void;
+  "player:gameover": (payload: PlayerGameOverPayload) => void;
+  "game:over": (payload: GameOverPayload) => void;
 }
 
 interface ClientToServerEvents {
   "player:move": (payload: PlayerMovePayload) => void;
   "animal:approach": (payload: AnimalApproachPayload) => void;
   "puzzle:end": (payload: PuzzleEndPayload) => void;
+  "puzzle:guess": (payload: PuzzleGuessPayload) => void;
+  "puzzle:hint": (payload: PuzzleHintRequestPayload) => void;
 }
 
 export class SocketManager {
@@ -100,6 +152,14 @@ export class SocketManager {
     this.socket?.emit("puzzle:end", payload);
   }
 
+  public emitPuzzleGuess(payload: PuzzleGuessPayload): void {
+    this.socket?.emit("puzzle:guess", payload);
+  }
+
+  public emitPuzzleHint(payload: PuzzleHintRequestPayload): void {
+    this.socket?.emit("puzzle:hint", payload);
+  }
+
   public onPlayerMoved(
     handler: (payload: PlayerMovedPayload) => void
   ): () => void {
@@ -126,6 +186,40 @@ export class SocketManager {
     const socket = this.connect();
     socket.on("puzzle:start", handler);
     return () => socket.off("puzzle:start", handler);
+  }
+
+  public onPuzzleResult(
+    handler: (payload: PuzzleResultPayload) => void
+  ): () => void {
+    const socket = this.connect();
+    socket.on("puzzle:result", handler);
+    return () => socket.off("puzzle:result", handler);
+  }
+
+  public onPuzzleHint(handler: (payload: PuzzleHintPayload) => void): () => void {
+    const socket = this.connect();
+    socket.on("puzzle:hint", handler);
+    return () => socket.off("puzzle:hint", handler);
+  }
+
+  public onStateUpdate(handler: (payload: StateUpdatePayload) => void): () => void {
+    const socket = this.connect();
+    socket.on("state:update", handler);
+    return () => socket.off("state:update", handler);
+  }
+
+  public onPlayerGameOver(
+    handler: (payload: PlayerGameOverPayload) => void
+  ): () => void {
+    const socket = this.connect();
+    socket.on("player:gameover", handler);
+    return () => socket.off("player:gameover", handler);
+  }
+
+  public onGameOver(handler: (payload: GameOverPayload) => void): () => void {
+    const socket = this.connect();
+    socket.on("game:over", handler);
+    return () => socket.off("game:over", handler);
   }
 
   private getServerUrl(): string {
