@@ -19,18 +19,43 @@ export interface GameStartPayload {
   players?: Array<string | PlayerIdentity>;
   playerIds?: string[];
   ids?: string[];
+  animals?: AnimalStatePayload[];
 }
 
 export type RoomFullPayload = { message?: string } | string;
+
+export interface AnimalApproachPayload {
+  animalId: string;
+}
+
+export interface AnimalStatePayload {
+  id: string;
+  x: number;
+  y: number;
+  discovered?: boolean;
+}
+
+export interface PuzzleStartPayload {
+  animalId: string;
+  hiddenName: string | string[];
+  hint1: string;
+}
+
+export interface PuzzleEndPayload {
+  animalId: string;
+}
 
 interface ServerToClientEvents {
   "player:moved": (payload: PlayerMovedPayload) => void;
   "game:start": (payload: GameStartPayload) => void;
   "room:full": (payload?: RoomFullPayload) => void;
+  "puzzle:start": (payload: PuzzleStartPayload) => void;
 }
 
 interface ClientToServerEvents {
   "player:move": (payload: PlayerMovePayload) => void;
+  "animal:approach": (payload: AnimalApproachPayload) => void;
+  "puzzle:end": (payload: PuzzleEndPayload) => void;
 }
 
 export class SocketManager {
@@ -67,6 +92,14 @@ export class SocketManager {
     this.socket?.emit("player:move", payload);
   }
 
+  public emitAnimalApproach(payload: AnimalApproachPayload): void {
+    this.socket?.emit("animal:approach", payload);
+  }
+
+  public emitPuzzleEnd(payload: PuzzleEndPayload): void {
+    this.socket?.emit("puzzle:end", payload);
+  }
+
   public onPlayerMoved(
     handler: (payload: PlayerMovedPayload) => void
   ): () => void {
@@ -85,6 +118,14 @@ export class SocketManager {
     const socket = this.connect();
     socket.on("room:full", handler);
     return () => socket.off("room:full", handler);
+  }
+
+  public onPuzzleStart(
+    handler: (payload: PuzzleStartPayload) => void
+  ): () => void {
+    const socket = this.connect();
+    socket.on("puzzle:start", handler);
+    return () => socket.off("puzzle:start", handler);
   }
 
   private getServerUrl(): string {

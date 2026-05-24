@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { MenuScene } from "./scenes/MenuScene";
 import { GameScene } from "./scenes/GameScene";
+import { PuzzleScene } from "./scenes/PuzzleScene";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.CANVAS, 
@@ -8,7 +9,7 @@ const config: Phaser.Types.Core.GameConfig = {
   height: 720,
   backgroundColor: "#0a1628",
   parent: "app",
-  scene: [MenuScene, GameScene],
+  scene: [MenuScene, GameScene, PuzzleScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
