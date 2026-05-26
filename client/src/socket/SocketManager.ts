@@ -262,14 +262,18 @@ export class SocketManager {
 
   private getServerUrl(): string {
     const meta = import.meta as ImportMeta & {
-      env?: Record<string, string | undefined>;
+      env?: {
+        VITE_SOCKET_URL?: string;
+        DEV?: boolean;
+      };
     };
-    // return meta.env?.VITE_SOCKET_URL ?? "http://localhost:3001"; // teste para o mesmo pc
-    return (
-    meta.env?.VITE_SOCKET_URL ??
-    `http://${window.location.hostname}:3001` // teste para computadores diferentes na mesma rede local
-  );
 
+    return (
+      meta.env?.VITE_SOCKET_URL?.trim() ||
+      (meta.env?.DEV
+        ? "http://localhost:3001"
+        : "https://underwater-game-server.onrender.com")
+    );
   }
 
   private bindStateCache(): void {
