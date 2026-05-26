@@ -14,3 +14,7 @@ server/dist/
 # Generated TypeScript files
 shared/types/*.js
 shared/types/*.js.map
+client/node_modules/
+client/dist/
+node_modules/
+dist/
