@@ -55,20 +55,33 @@ export interface PuzzleHintRequestPayload {
   hintIndex: number;
 }
 
+export interface PlayerHitPayload {
+  obstacleType: string;
+}
+
 export interface PuzzleHintPayload {
   hint?: string;
   oxygen?: number;
+  playerId?: string;
+  socketId?: string;
+  id?: string;
 }
 
 export interface PuzzleResultPayload {
   correct: boolean;
   positions: number[];
   letter: string;
+  animalId?: string;
   hiddenName?: string | string[];
   hidden_name?: string | string[];
   maskedName?: string | string[];
   nameMask?: string | string[];
   oxygen?: number;
+  playerId?: string;
+  socketId?: string;
+  id?: string;
+  completed?: boolean;
+  discovered?: boolean;
 }
 
 export interface PlayerStatePayload {
@@ -84,10 +97,18 @@ export type StateUpdatePayload = Record<string, PlayerStatePayload>;
 
 export interface PlayerGameOverPayload {
   playerId: string;
+  socketId?: string;
+  id?: string;
+  x?: number;
+  y?: number;
+  spawn?: { x: number; y: number };
+  state?: StateUpdatePayload;
+  players?: StateUpdatePayload;
 }
 
 export interface GameOverPayload {
   winner?: string;
+  winnerId?: string;
 }
 
 interface ServerToClientEvents {
@@ -108,6 +129,7 @@ interface ClientToServerEvents {
   "puzzle:end": (payload: PuzzleEndPayload) => void;
   "puzzle:guess": (payload: PuzzleGuessPayload) => void;
   "puzzle:hint": (payload: PuzzleHintRequestPayload) => void;
+  "player:hit": (payload: PlayerHitPayload) => void;
 }
 
 export class SocketManager {
@@ -166,6 +188,10 @@ export class SocketManager {
 
   public emitPuzzleHint(payload: PuzzleHintRequestPayload): void {
     this.socket?.emit("puzzle:hint", payload);
+  }
+
+  public emitPlayerHit(payload: PlayerHitPayload): void {
+    this.socket?.emit("player:hit", payload);
   }
 
   public onPlayerMoved(
@@ -236,14 +262,18 @@ export class SocketManager {
 
   private getServerUrl(): string {
     const meta = import.meta as ImportMeta & {
-      env?: Record<string, string | undefined>;
+      env?: {
+        VITE_SOCKET_URL?: string;
+        DEV?: boolean;
+      };
     };
-    // return meta.env?.VITE_SOCKET_URL ?? "http://localhost:3001"; // teste para o mesmo pc
-    return (
-    meta.env?.VITE_SOCKET_URL ??
-    `http://${window.location.hostname}:3001` // teste para computadores diferentes na mesma rede local
-  );
 
+    return (
+      meta.env?.VITE_SOCKET_URL?.trim() ||
+      (meta.env?.DEV
+        ? "http://localhost:3001"
+        : "https://underwater-game-server.onrender.com")
+    );
   }
 
   private bindStateCache(): void {

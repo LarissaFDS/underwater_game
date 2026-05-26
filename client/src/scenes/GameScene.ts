@@ -10,9 +10,12 @@ import {
   socketManager,
   type AnimalStatePayload,
   type GameStartPayload,
+  type GameOverPayload,
+  type PlayerGameOverPayload,
   type PlayerIdentity,
   type PlayerMovedPayload,
   type PuzzleStartPayload,
+  type StateUpdatePayload,
 } from "../socket/SocketManager";
 import { MapGenerationSystem } from "../systems/MapGenerationSystem";
 import { MovementSystem } from "../systems/MovementSystem";
@@ -27,6 +30,9 @@ const FALLBACK_ANIMALS: AnimalStatePayload[] = [
   { id: "tubarao-martelo", x: 2200, y: 500, discovered: false },
   { id: "arraia", x: 400, y: 900, discovered: false },
 ];
+const SPAWN_X = 0;
+const SPAWN_Y = 0;
+const OBSTACLE_HIT_COOLDOWN_MS = 1000;
 
 export class GameScene extends Phaser.Scene {
   private player!: PlayerSubmarine;
@@ -51,9 +57,15 @@ export class GameScene extends Phaser.Scene {
   private isPuzzleActive = false;
   private pendingPuzzleAnimalId?: string;
   private pendingPuzzleTimeout?: Phaser.Time.TimerEvent;
+  private lastObstacleHitTime = -OBSTACLE_HIT_COOLDOWN_MS;
+  private isGameOver = false;
+  private gameOverOverlay?: Phaser.GameObjects.Container;
   private hasWindowFocus = true;
   private isPageVisible = true;
   private isPointerInsideCanvas = true;
+  private readonly handleAnimalDiscovered = (animalId: string): void => {
+    this.markAnimalDiscovered(animalId);
+  };
   private readonly handleWindowBlur = (): void => {
     this.hasWindowFocus = false;
   };
@@ -80,6 +92,10 @@ export class GameScene extends Phaser.Scene {
     this.animalsInRange.clear();
     this.triggeredAnimalIds.clear();
     this.isPuzzleActive = false;
+    this.isGameOver = false;
+    this.lastObstacleHitTime = -OBSTACLE_HIT_COOLDOWN_MS;
+    this.gameOverOverlay?.destroy();
+    this.gameOverOverlay = undefined;
     this.clearPendingPuzzle();
   }
 
@@ -122,16 +138,12 @@ export class GameScene extends Phaser.Scene {
     this.partnerHud.setScale(partnerHudScale);
 
     this.localHud.setOxygen(100);
-    this.localHud.setHearts(2);
-
-    this.time.delayedCall(1000, () => {
-      this.localHud.setOxygen(50);
-    });
-
+    this.localHud.setHearts(3);
     this.partnerHud.setOxygen(100);
     this.partnerHud.setHearts(3);
 
     this.setupActivityListeners();
+    this.game.events.on("animal:discovered", this.handleAnimalDiscovered);
 
     this.unsubscribeSocketEvents.push(
       socketManager.onPlayerMoved((payload: PlayerMovedPayload) => {
@@ -161,11 +173,25 @@ export class GameScene extends Phaser.Scene {
         this.releasePuzzleLockOnShutdown();
         this.scene.launch("PuzzleScene", payload);
         this.scene.pause("GameScene");
+      }),
+      socketManager.onStateUpdate((payload: StateUpdatePayload) => {
+        this.applyStateUpdate(payload);
+      }),
+      socketManager.onPlayerGameOver((payload: PlayerGameOverPayload) => {
+        this.handlePlayerGameOver(payload);
+      }),
+      socketManager.onGameOver((payload: GameOverPayload) => {
+        this.handleGameOver(payload);
       })
     );
 
+    if (socketManager.currentState) {
+      this.applyStateUpdate(socketManager.currentState);
+    }
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.removeActivityListeners();
+      this.game.events.off("animal:discovered", this.handleAnimalDiscovered);
       this.clearPendingPuzzle();
       this.unsubscribeSocketEvents.forEach((unsubscribe) => unsubscribe());
       this.unsubscribeSocketEvents = [];
@@ -187,6 +213,7 @@ export class GameScene extends Phaser.Scene {
       this.player.x = Phaser.Math.Clamp(this.player.x, 0, MAP_WIDTH);
       this.player.y = Phaser.Math.Clamp(this.player.y, 0, MAP_HEIGHT);
       this.emitPlayerPosition(time);
+      this.checkObstacleCollision(time);
       this.checkAnimalProximity();
     }
 
@@ -253,6 +280,7 @@ export class GameScene extends Phaser.Scene {
 
   private canControlPlayer(): boolean {
     return (
+      !this.isGameOver &&
       this.hasWindowFocus &&
       this.isPageVisible &&
       this.isPointerInsideCanvas
@@ -305,6 +333,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private checkAnimalProximity(): void {
+    if (this.isGameOver) {
+      return;
+    }
+
     if (this.hasPuzzleLock()) {
       return;
     }
@@ -340,6 +372,27 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  private checkObstacleCollision(time: number): void {
+    if (time - this.lastObstacleHitTime < OBSTACLE_HIT_COOLDOWN_MS) {
+      return;
+    }
+
+    const playerBounds = this.player.getBounds();
+    const obstacle = this.mapGenerationSystem
+      .getObstacleBounds()
+      .find(({ bounds }) =>
+        Phaser.Geom.Intersects.RectangleToRectangle(playerBounds, bounds)
+      );
+
+    if (!obstacle) {
+      return;
+    }
+
+    this.lastObstacleHitTime = time;
+    this.flashSubmarine(this.player);
+    socketManager.emitPlayerHit({ obstacleType: obstacle.obstacleType });
+  }
+
   private hasPuzzleLock(): boolean {
     return this.isPuzzleActive || this.pendingPuzzleAnimalId !== undefined;
   }
@@ -371,6 +424,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private emitPlayerPosition(time: number): void {
+    if (this.isGameOver) {
+      return;
+    }
+
     if (time - this.lastMoveEmissionTime < 50) {
       return;
     }
@@ -430,5 +487,161 @@ export class GameScene extends Phaser.Scene {
       1
     );
     this.depthOverlay.setAlpha(depthProgress * DEPTH_OVERLAY_MAX_ALPHA);
+  }
+
+  private applyStateUpdate(payload: StateUpdatePayload): void {
+    const localPlayerId = this.getLocalPlayerId();
+
+    Object.entries(payload).forEach(([id, playerState]) => {
+      const playerId = playerState.id || id;
+      const isLocalPlayer =
+        localPlayerId !== undefined &&
+        (playerId === localPlayerId || id === localPlayerId);
+
+      if (isLocalPlayer) {
+        this.localHud.setOxygen(playerState.oxygen);
+        this.localHud.setHearts(playerState.hearts);
+        return;
+      }
+
+      this.partnerHud.setOxygen(playerState.oxygen);
+      this.partnerHud.setHearts(playerState.hearts);
+
+      if (Number.isFinite(playerState.x) && Number.isFinite(playerState.y)) {
+        this.partnerTarget.set(
+          Phaser.Math.Clamp(playerState.x, 0, MAP_WIDTH),
+          Phaser.Math.Clamp(playerState.y, 0, MAP_HEIGHT)
+        );
+      }
+    });
+  }
+
+  private handlePlayerGameOver(payload: PlayerGameOverPayload): void {
+    this.applyStateUpdate(payload.state ?? payload.players ?? {});
+
+    const affectedPlayerId = this.getPayloadPlayerId(payload);
+    const localPlayerId = this.getLocalPlayerId();
+    const eventState = payload.state ?? payload.players;
+    const affectedPlayerState = affectedPlayerId
+      ? this.findPlayerState(eventState ?? {}, affectedPlayerId)
+      : undefined;
+    const spawn = this.getSpawnPosition(payload, affectedPlayerState);
+
+    if (affectedPlayerId && affectedPlayerId === localPlayerId) {
+      this.player.setPosition(spawn.x, spawn.y);
+      this.partnerTarget.set(this.partner.x, this.partner.y);
+      this.cameras.main.flash(260, 239, 68, 68);
+      this.flashSubmarine(this.player);
+      return;
+    }
+
+    if (!affectedPlayerId || affectedPlayerId !== localPlayerId) {
+      this.partner.setPosition(spawn.x, spawn.y);
+      this.partnerTarget.set(spawn.x, spawn.y);
+      this.flashSubmarine(this.partner);
+    }
+  }
+
+  private handleGameOver(payload: GameOverPayload): void {
+    if (this.isGameOver) {
+      return;
+    }
+
+    this.isGameOver = true;
+
+    const winnerId = payload.winnerId ?? payload.winner;
+    const localPlayerId = this.getLocalPlayerId();
+    const winnerMessage =
+      winnerId === undefined
+        ? "Fim de jogo"
+        : winnerId === localPlayerId
+          ? "Voce venceu!"
+          : "Seu parceiro venceu!";
+    const detailMessage = winnerId ? `Vencedor: ${winnerId}` : "";
+
+    const { width, height } = this.scale;
+    const overlay = this.add.container(0, 0);
+    overlay.setScrollFactor(0);
+    overlay.setDepth(2000);
+
+    const background = this.add
+      .rectangle(0, 0, width, height, 0x020617, 0.78)
+      .setOrigin(0);
+    const title = this.add
+      .text(width / 2, height / 2 - 42, winnerMessage, {
+        fontSize: "44px",
+        color: "#f8fafc",
+        align: "center",
+      })
+      .setOrigin(0.5);
+    const subtitle = this.add
+      .text(width / 2, height / 2 + 24, detailMessage, {
+        fontSize: "20px",
+        color: "#bae6fd",
+        align: "center",
+        wordWrap: { width: width - 120 },
+      })
+      .setOrigin(0.5);
+
+    overlay.add([background, title, subtitle]);
+    this.gameOverOverlay = overlay;
+  }
+
+  private getLocalPlayerId(): string | undefined {
+    this.localPlayerId = this.localPlayerId ?? socketManager.currentSocket?.id;
+    return this.localPlayerId;
+  }
+
+  private getPayloadPlayerId(payload: PlayerGameOverPayload): string | undefined {
+    return payload.playerId ?? payload.socketId ?? payload.id;
+  }
+
+  private findPlayerState(
+    payload: StateUpdatePayload,
+    playerId: string
+  ): StateUpdatePayload[string] | undefined {
+    return (
+      payload[playerId] ??
+      Object.values(payload).find((playerState) => playerState.id === playerId)
+    );
+  }
+
+  private getSpawnPosition(
+    payload: PlayerGameOverPayload,
+    playerState?: StateUpdatePayload[string]
+  ): Phaser.Math.Vector2 {
+    const x = payload.spawn?.x ?? payload.x ?? playerState?.x ?? SPAWN_X;
+    const y = payload.spawn?.y ?? payload.y ?? playerState?.y ?? SPAWN_Y;
+
+    return new Phaser.Math.Vector2(
+      Phaser.Math.Clamp(x, 0, MAP_WIDTH),
+      Phaser.Math.Clamp(y, 0, MAP_HEIGHT)
+    );
+  }
+
+  private flashSubmarine(submarine: PlayerSubmarine): void {
+    this.tweens.killTweensOf(submarine);
+    submarine.setAlpha(0.35);
+    this.tweens.add({
+      targets: submarine,
+      alpha: 1,
+      duration: 130,
+      repeat: 3,
+      yoyo: true,
+      ease: "Sine.InOut",
+    });
+  }
+
+  private markAnimalDiscovered(animalId: string): void {
+    const animal = this.animals.find((currentAnimal) => currentAnimal.id === animalId);
+
+    if (!animal) {
+      return;
+    }
+
+    animal.discovered = true;
+    animal.setAlpha(0.45);
+    this.triggeredAnimalIds.add(animalId);
+    this.animalsInRange.delete(animalId);
   }
 }

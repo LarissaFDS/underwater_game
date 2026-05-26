@@ -7,16 +7,33 @@ import {
   SEAWEED_CONFIG,
 } from "../data/mapConfig";
 
+export interface MapObstacleBounds {
+  obstacleType: string;
+  bounds: Phaser.Geom.Rectangle;
+}
+
 export class MapGenerationSystem {
   private seed = 1;
+  private readonly obstacles: Array<{
+    obstacleType: string;
+    object: Phaser.GameObjects.Rectangle;
+  }> = [];
 
   constructor(private readonly scene: Phaser.Scene) {}
 
   public generate(seed: number): void {
     this.seed = seed || 1;
+    this.obstacles.length = 0;
     this.createBaseGrid();
     this.createRocks();
     this.createSeaweed();
+  }
+
+  public getObstacleBounds(): MapObstacleBounds[] {
+    return this.obstacles.map((obstacle) => ({
+      obstacleType: obstacle.obstacleType,
+      bounds: obstacle.object.getBounds(),
+    }));
   }
 
   private createBaseGrid(): void {
@@ -49,6 +66,7 @@ export class MapGenerationSystem {
       rock.setStrokeStyle(3, 0x39434d, 0.8);
       rock.setRotation(this.randomFloat(-0.35, 0.35));
       rock.setDepth(1);
+      this.obstacles.push({ obstacleType: "rock", object: rock });
 
       const highlight = this.scene.add.rectangle(
         x - width * 0.18,
