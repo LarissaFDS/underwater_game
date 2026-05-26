@@ -1,0 +1,23 @@
+{
+    "name": "ocean-game-service",
+    "version": "1.0.0",
+    "description": "Microsserviço de WebSockets para estado do jogo e movimentação",
+    "main": "src/index.ts",
+    "scripts": {
+      "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+      "build": "tsc",
+      "start": "node build/index.js"
+    },
+    "dependencies": {
+      "cors": "^2.8.5",
+      "express": "^4.18.2",
+      "socket.io": "^4.7.5"
+    },
+    "devDependencies": {
+      "@types/cors": "^2.8.17",
+      "@types/express": "^4.17.21",
+      "@types/node": "^20.0.0",
+      "ts-node-dev": "^2.0.0",
+      "typescript": "^5.0.0"
+    }
+  }
