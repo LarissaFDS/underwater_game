@@ -23,7 +23,10 @@ const io = new Server(server, {
 
 //Rota de Health Check
 app.get('/', (req: Request, res: Response) => {
-  res.send('Servidor do Submarino rodando perfeitamente!');
+  res.status(200).json({
+    status: 'ok',
+    service: 'underwater-game-server'
+  });
 });
 
 //=========================================================================
@@ -301,9 +304,10 @@ io.on('connection', (socket: Socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
+// Definição da porta
+const PORT = Number(process.env.PORT) || 3001;
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Servidor rodando na porta ${PORT}`);
-  console.log(`Aguardando conexões do frontend...`);
+  console.log('Aguardando conexões do frontend...');
 });
