@@ -159,7 +159,7 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  socket.on(SocketEvents.ANIMAL_APPROACH, (data: { animalId: string }) => {
+  socket.on(SocketEvents.ANIMAL_APPROACH, async (data: { animalId: string }) => {
     if (roomState.activePuzzleAnimalId !== null) return;
 
     const { animalId } = data;
@@ -171,11 +171,23 @@ io.on('connection', (socket: Socket) => {
     roomState.activePuzzleAnimalId = animalId;
     roomState.puzzleEndConfirmations.clear();
 
-    io.to(ROOM_NAME).emit(SocketEvents.PUZZLE_START, {
-      animalId: animalId,
-      hiddenName: catalogData.hiddenName,
-      hint1: catalogData.hints[0]
-    });
+    //Busca a primeira dica pela puzzle-api, igual às dicas seguintes
+    try {
+      const hintResponse = await fetch(`${PUZZLE_API_URL}/api/puzzle/hint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ animalId, hintIndex: 0 })
+      });
+      const { hint } = await hintResponse.json();
+
+      io.to(ROOM_NAME).emit(SocketEvents.PUZZLE_START, {
+        animalId,
+        hiddenName: catalogData.hiddenName, //hiddenName ainda vem do catalog
+        hint1: hint
+      });
+    } catch (error) {
+      console.error('Erro ao buscar dica inicial na Puzzle API:', error);
+    }
   });
 
   socket.on(SocketEvents.PUZZLE_END, (data: { animalId?: string }) => {
