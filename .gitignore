@@ -1,9 +1,11 @@
 # Dependencies
 node_modules/
+client/node_modules/
 server/node_modules/
 
-# Build output
+# Build outputs
 dist/
+client/dist/
 server/dist/
 
 # Environment files
@@ -11,6 +13,6 @@ server/dist/
 .env.local
 .env.*.local
 
-# Generated TypeScript files
+# TypeScript generated files
 shared/types/*.js
 shared/types/*.js.map
