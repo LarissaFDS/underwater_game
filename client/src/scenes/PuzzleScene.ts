@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import {
   socketManager,
+  type PlayerGameOverPayload,
   type PuzzleHintPayload,
   type PuzzleResultPayload,
   type PuzzleStartPayload,
@@ -20,10 +21,12 @@ export class PuzzleScene extends Phaser.Scene {
   private animalId = "";
   private wordSlots: string[] = [];
   private readonly attemptedLetters = new Set<string>();
+  private readonly pendingLocalLetters = new Set<string>();
   private readonly hints: string[] = [];
   private nextHintIndex = 1;
   private oxygen = 100;
   private isClosing = false;
+  private isPuzzleCompleted = false;
   private isHintPending = false;
   private hasNoMoreHints = false;
   private oxygenBeforeHint?: number;
@@ -67,10 +70,12 @@ export class PuzzleScene extends Phaser.Scene {
     this.animalId = data.animalId;
     this.wordSlots = this.parseHiddenName();
     this.attemptedLetters.clear();
+    this.pendingLocalLetters.clear();
     this.hints.splice(0, this.hints.length, data.hint1);
     this.nextHintIndex = 1;
     this.oxygen = this.getInitialOxygen();
     this.isClosing = false;
+    this.isPuzzleCompleted = false;
     this.isHintPending = false;
     this.hasNoMoreHints = false;
     this.oxygenBeforeHint = undefined;
@@ -101,7 +106,9 @@ export class PuzzleScene extends Phaser.Scene {
       socketManager.onPuzzleResult((payload) => this.handlePuzzleResult(payload)),
       socketManager.onPuzzleHint((payload) => this.handlePuzzleHint(payload)),
       socketManager.onStateUpdate((payload) => this.handleStateUpdate(payload)),
-      socketManager.onPlayerGameOver(() => this.closePuzzle(false)),
+      socketManager.onPlayerGameOver((payload) =>
+        this.handlePlayerGameOver(payload)
+      ),
       socketManager.onGameOver(() => this.closePuzzle(false))
     );
 
@@ -267,18 +274,30 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private submitLetter(letter: string): void {
-    if (!this.animalId || this.attemptedLetters.has(letter)) {
+    if (
+      !this.animalId ||
+      this.isClosing ||
+      this.isPuzzleCompleted ||
+      this.attemptedLetters.has(letter)
+    ) {
       return;
     }
 
     this.attemptedLetters.add(letter);
+    this.pendingLocalLetters.add(letter);
     this.updateAttemptsText();
     this.setFeedback(`Letra enviada: ${letter.toUpperCase()}`, 0x94a3b8);
     socketManager.emitPuzzleGuess({ animalId: this.animalId, letter });
   }
 
   private requestHint(): void {
-    if (!this.animalId || this.isHintPending || this.hasNoMoreHints) {
+    if (
+      !this.animalId ||
+      this.isClosing ||
+      this.isPuzzleCompleted ||
+      this.isHintPending ||
+      this.hasNoMoreHints
+    ) {
       return;
     }
 
@@ -294,30 +313,66 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private handlePuzzleResult(payload: PuzzleResultPayload): void {
-    this.attemptedLetters.add(payload.letter.toLowerCase());
-    this.updateAttemptsText();
-    this.applyServerHiddenName(payload);
-
-    if (payload.correct) {
-      this.revealLetter(payload.letter, payload.positions);
-      this.setFeedback("Acerto!", 0x22c55e);
-    } else {
-      this.setFeedback("Erro! O2 reduzido.", 0xef4444);
-      this.flashError();
-      this.applyOxygenDelta(-10);
+    if (payload.animalId && payload.animalId !== this.animalId) {
+      return;
     }
 
-    if (typeof payload.oxygen === "number") {
+    const letter = this.normalizeLetter(payload.letter);
+
+    if (!letter) {
+      return;
+    }
+
+    const payloadPlayerId = this.getPayloadPlayerId(payload);
+    const isLocalResult = this.isLocalPuzzleResult(payloadPlayerId, letter);
+    const hasSharedWordState = this.applyServerHiddenName(payload);
+
+    if (payload.correct) {
+      this.revealLetter(letter, payload.positions);
+    }
+
+    if (isLocalResult) {
+      this.attemptedLetters.add(letter);
+      this.updateAttemptsText();
+
+      if (payload.correct) {
+        this.setFeedback("Acerto!", 0x22c55e);
+      } else {
+        this.setFeedback("Erro! O2 reduzido.", 0xef4444);
+        this.flashError();
+        this.applyOxygenDelta(-10);
+      }
+    } else if (
+      payload.correct ||
+      hasSharedWordState ||
+      payload.completed ||
+      payload.discovered
+    ) {
+      this.setFeedback("Seu parceiro encontrou uma letra.", 0x38bdf8);
+    } else {
+      return;
+    }
+
+    if (typeof payload.oxygen === "number" && isLocalResult) {
       this.setOxygen(payload.oxygen);
     }
 
-    if (this.isWordComplete()) {
-      this.setFeedback("Animal identificado!", 0x22c55e);
-      this.time.delayedCall(800, () => this.closePuzzle(true));
+    if (payload.completed || payload.discovered || this.isWordComplete()) {
+      this.completePuzzle(isLocalResult);
     }
   }
 
   private handlePuzzleHint(payload: PuzzleHintPayload): void {
+    const payloadPlayerId = this.getPayloadPlayerId(payload);
+
+    if (payloadPlayerId && payloadPlayerId !== this.getLocalPlayerId()) {
+      return;
+    }
+
+    if (!payloadPlayerId && !this.isHintPending) {
+      return;
+    }
+
     this.isHintPending = false;
 
     if (payload.hint) {
@@ -347,30 +402,87 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private handleStateUpdate(payload: StateUpdatePayload): void {
-    const oxygenValues = Object.values(payload)
-      .map((player) => player.oxygen)
-      .filter((oxygen) => Number.isFinite(oxygen));
+    const localState = this.getLocalPlayerState(payload);
 
-    if (oxygenValues.length > 0) {
-      this.setOxygen(Math.min(...oxygenValues));
+    if (typeof localState?.oxygen === "number") {
+      this.setOxygen(localState.oxygen);
     }
   }
 
-  private getInitialOxygen(): number {
-    const state = socketManager.currentState;
-    const localPlayerId = socketManager.currentSocket?.id;
-    const localOxygen = localPlayerId ? state?.[localPlayerId]?.oxygen : undefined;
+  private handlePlayerGameOver(payload: PlayerGameOverPayload): void {
+    const payloadPlayerId = this.getPayloadPlayerId(payload);
 
-    if (typeof localOxygen === "number") {
-      return Phaser.Math.Clamp(localOxygen, 0, 100);
+    if (!payloadPlayerId || payloadPlayerId === this.getLocalPlayerId()) {
+      this.closePuzzle(false);
+    }
+  }
+
+  private completePuzzle(completedByLocalPlayer: boolean): void {
+    if (this.isPuzzleCompleted || this.isClosing) {
+      return;
     }
 
-    const oxygenValues = Object.values(state ?? {})
-      .map((player) => player.oxygen)
-      .filter((oxygen) => Number.isFinite(oxygen));
+    this.isPuzzleCompleted = true;
+    this.pendingLocalLetters.clear();
+    this.game.events.emit("animal:discovered", this.animalId);
+    this.updateHintButtonState();
 
-    return oxygenValues.length > 0
-      ? Phaser.Math.Clamp(Math.min(...oxygenValues), 0, 100)
+    this.setFeedback(
+      completedByLocalPlayer
+        ? "Voce identificou o animal!"
+        : "Seu parceiro identificou o animal!",
+      0x22c55e
+    );
+
+    this.time.delayedCall(1000, () => this.closePuzzle(true));
+  }
+
+  private isLocalPuzzleResult(
+    payloadPlayerId: string | undefined,
+    letter: string
+  ): boolean {
+    if (payloadPlayerId) {
+      if (payloadPlayerId === this.getLocalPlayerId()) {
+        this.pendingLocalLetters.delete(letter);
+        return true;
+      }
+
+      return false;
+    }
+
+    return this.pendingLocalLetters.delete(letter);
+  }
+
+  private getLocalPlayerState(
+    payload: StateUpdatePayload
+  ): StateUpdatePayload[string] | undefined {
+    const localPlayerId = this.getLocalPlayerId();
+
+    if (!localPlayerId) {
+      return undefined;
+    }
+
+    return (
+      payload[localPlayerId] ??
+      Object.values(payload).find((player) => player.id === localPlayerId)
+    );
+  }
+
+  private getPayloadPlayerId(
+    payload: PuzzleResultPayload | PuzzleHintPayload | PlayerGameOverPayload
+  ): string | undefined {
+    return payload.playerId ?? payload.socketId ?? payload.id;
+  }
+
+  private getLocalPlayerId(): string | undefined {
+    return socketManager.currentSocket?.id;
+  }
+
+  private getInitialOxygen(): number {
+    const localState = this.getLocalPlayerState(socketManager.currentState ?? {});
+
+    return typeof localState?.oxygen === "number"
+      ? Phaser.Math.Clamp(localState.oxygen, 0, 100)
       : 100;
   }
 
@@ -395,17 +507,21 @@ export class PuzzleScene extends Phaser.Scene {
     this.renderWord(changedPositions);
   }
 
-  private applyServerHiddenName(payload: PuzzleResultPayload): void {
+  private applyServerHiddenName(payload: PuzzleResultPayload): boolean {
     const hiddenName =
       payload.hiddenName ??
       payload.hidden_name ??
       payload.maskedName ??
       payload.nameMask;
 
-    if (hiddenName !== undefined) {
-      this.wordSlots = this.parseHiddenNameValue(hiddenName);
-      this.renderWord();
+    if (hiddenName === undefined) {
+      return false;
     }
+
+    this.wordSlots = this.parseHiddenNameValue(hiddenName);
+    this.renderWord();
+
+    return true;
   }
 
   private renderWord(highlightPositions: number[] = []): void {
@@ -518,7 +634,11 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private updateHintButtonState(): void {
-    const isDisabled = this.isHintPending || this.hasNoMoreHints;
+    const isDisabled =
+      this.isHintPending ||
+      this.hasNoMoreHints ||
+      this.isPuzzleCompleted ||
+      this.isClosing;
     this.hintButton.disableInteractive();
 
     if (!isDisabled) {
@@ -529,7 +649,13 @@ export class PuzzleScene extends Phaser.Scene {
       isDisabled ? 0x64748b : 0xfacc15,
       isDisabled ? 0.72 : 0.96
     );
-    this.hintButtonLabel.setText(this.hasNoMoreHints ? "Sem dicas" : "Pedir dica");
+    this.hintButtonLabel.setText(
+      this.isPuzzleCompleted
+        ? "Completo"
+        : this.hasNoMoreHints
+          ? "Sem dicas"
+          : "Pedir dica"
+    );
     this.hintButtonLabel.setColor(isDisabled ? "#cbd5e1" : "#0f172a");
   }
 
