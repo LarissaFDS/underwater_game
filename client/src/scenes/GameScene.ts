@@ -593,7 +593,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getPayloadPlayerId(payload: PlayerGameOverPayload): string | undefined {
-    return payload.playerId ?? payload.socketId ?? payload.id;
+    return (
+      payload.playerId ??
+      payload.id ??
+      payload.socketId ??
+      payload.affectedPlayerId ??
+      payload.deadPlayerId ??
+      payload.player?.id ??
+      payload.player?.playerId ??
+      payload.socket?.id
+    );
   }
 
   private findPlayerState(

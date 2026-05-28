@@ -65,6 +65,10 @@ export interface PuzzleHintPayload {
   playerId?: string;
   socketId?: string;
   id?: string;
+  affectedPlayerId?: string;
+  deadPlayerId?: string;
+  player?: { id?: string; playerId?: string };
+  socket?: { id?: string };
 }
 
 export interface PuzzleResultPayload {
@@ -80,6 +84,10 @@ export interface PuzzleResultPayload {
   playerId?: string;
   socketId?: string;
   id?: string;
+  affectedPlayerId?: string;
+  deadPlayerId?: string;
+  player?: { id?: string; playerId?: string };
+  socket?: { id?: string };
   completed?: boolean;
   discovered?: boolean;
 }
@@ -96,9 +104,15 @@ export interface PlayerStatePayload {
 export type StateUpdatePayload = Record<string, PlayerStatePayload>;
 
 export interface PlayerGameOverPayload {
-  playerId: string;
+  playerId?: string;
   socketId?: string;
   id?: string;
+  affectedPlayerId?: string;
+  deadPlayerId?: string;
+  player?: { id?: string; playerId?: string };
+  socket?: { id?: string };
+  oxygen?: number;
+  hearts?: number;
   x?: number;
   y?: number;
   spawn?: { x: number; y: number };

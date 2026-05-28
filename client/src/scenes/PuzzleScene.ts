@@ -17,6 +17,8 @@ type PuzzleScenePayload = PuzzleStartPayload & {
 };
 
 export class PuzzleScene extends Phaser.Scene {
+  private readonly guessResponseTimeoutMs = 1500;
+  private readonly oxygenGameOverCloseDelayMs = 1200;
   private puzzleData?: PuzzleScenePayload;
   private animalId = "";
   private wordSlots: string[] = [];
@@ -29,7 +31,10 @@ export class PuzzleScene extends Phaser.Scene {
   private isPuzzleCompleted = false;
   private isHintPending = false;
   private hasNoMoreHints = false;
+  private isGuessPending = false;
   private oxygenBeforeHint?: number;
+  private guessResponseTimeoutTimer?: Phaser.Time.TimerEvent;
+  private closeTimer?: Phaser.Time.TimerEvent;
   private unsubscribeSocketEvents: Array<() => void> = [];
 
   private panelContainer!: Phaser.GameObjects.Container;
@@ -46,6 +51,10 @@ export class PuzzleScene extends Phaser.Scene {
   private hintButtonLabel!: Phaser.GameObjects.Text;
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (event.repeat) {
+      return;
+    }
+
     if (event.key === "Escape") {
       this.closePuzzle(true);
       return;
@@ -78,7 +87,10 @@ export class PuzzleScene extends Phaser.Scene {
     this.isPuzzleCompleted = false;
     this.isHintPending = false;
     this.hasNoMoreHints = false;
+    this.isGuessPending = false;
     this.oxygenBeforeHint = undefined;
+    this.guessResponseTimeoutTimer = undefined;
+    this.closeTimer = undefined;
   }
 
   create(): void {
@@ -116,6 +128,9 @@ export class PuzzleScene extends Phaser.Scene {
       this.input.keyboard?.off("keydown", this.handleKeyDown);
       this.unsubscribeSocketEvents.forEach((unsubscribe) => unsubscribe());
       this.unsubscribeSocketEvents = [];
+      this.clearPendingGuessState();
+      this.closeTimer?.remove(false);
+      this.closeTimer = undefined;
     });
   }
 
@@ -278,6 +293,8 @@ export class PuzzleScene extends Phaser.Scene {
       !this.animalId ||
       this.isClosing ||
       this.isPuzzleCompleted ||
+      this.oxygen <= 0 ||
+      this.isGuessInputBlocked() ||
       this.attemptedLetters.has(letter)
     ) {
       return;
@@ -285,6 +302,7 @@ export class PuzzleScene extends Phaser.Scene {
 
     this.attemptedLetters.add(letter);
     this.pendingLocalLetters.add(letter);
+    this.startGuessPending();
     this.updateAttemptsText();
     this.setFeedback(`Letra enviada: ${letter.toUpperCase()}`, 0x94a3b8);
     socketManager.emitPuzzleGuess({ animalId: this.animalId, letter });
@@ -296,7 +314,8 @@ export class PuzzleScene extends Phaser.Scene {
       this.isClosing ||
       this.isPuzzleCompleted ||
       this.isHintPending ||
-      this.hasNoMoreHints
+      this.hasNoMoreHints ||
+      this.oxygen <= 0
     ) {
       return;
     }
@@ -313,6 +332,10 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private handlePuzzleResult(payload: PuzzleResultPayload): void {
+    if (this.shouldIgnoreIncomingPuzzleUpdate()) {
+      return;
+    }
+
     if (payload.animalId && payload.animalId !== this.animalId) {
       return;
     }
@@ -332,6 +355,7 @@ export class PuzzleScene extends Phaser.Scene {
     }
 
     if (isLocalResult) {
+      this.clearGuessPending();
       this.attemptedLetters.add(letter);
       this.updateAttemptsText();
 
@@ -363,6 +387,10 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private handlePuzzleHint(payload: PuzzleHintPayload): void {
+    if (this.shouldIgnoreIncomingPuzzleUpdate()) {
+      return;
+    }
+
     const payloadPlayerId = this.getPayloadPlayerId(payload);
 
     if (payloadPlayerId && payloadPlayerId !== this.getLocalPlayerId()) {
@@ -402,6 +430,10 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private handleStateUpdate(payload: StateUpdatePayload): void {
+    if (this.shouldIgnoreIncomingPuzzleUpdate()) {
+      return;
+    }
+
     const localState = this.getLocalPlayerState(payload);
 
     if (typeof localState?.oxygen === "number") {
@@ -411,10 +443,15 @@ export class PuzzleScene extends Phaser.Scene {
 
   private handlePlayerGameOver(payload: PlayerGameOverPayload): void {
     const payloadPlayerId = this.getPayloadPlayerId(payload);
+    const localPlayerId = this.getLocalPlayerId();
+    const isLocalPlayer =
+      payloadPlayerId === undefined || payloadPlayerId === localPlayerId;
 
-    if (!payloadPlayerId || payloadPlayerId === this.getLocalPlayerId()) {
-      this.closePuzzle(false);
-    }
+    this.closePuzzleWithMessage(
+      isLocalPlayer
+        ? "Você ficou sem oxigênio"
+        : "Seu parceiro ficou sem oxigênio"
+    );
   }
 
   private completePuzzle(completedByLocalPlayer: boolean): void {
@@ -423,7 +460,7 @@ export class PuzzleScene extends Phaser.Scene {
     }
 
     this.isPuzzleCompleted = true;
-    this.pendingLocalLetters.clear();
+    this.clearPendingGuessState();
     this.game.events.emit("animal:discovered", this.animalId);
     this.updateHintButtonState();
 
@@ -471,7 +508,16 @@ export class PuzzleScene extends Phaser.Scene {
   private getPayloadPlayerId(
     payload: PuzzleResultPayload | PuzzleHintPayload | PlayerGameOverPayload
   ): string | undefined {
-    return payload.playerId ?? payload.socketId ?? payload.id;
+    return (
+      payload.playerId ??
+      payload.id ??
+      payload.socketId ??
+      payload.affectedPlayerId ??
+      payload.deadPlayerId ??
+      payload.player?.id ??
+      payload.player?.playerId ??
+      payload.socket?.id
+    );
   }
 
   private getLocalPlayerId(): string | undefined {
@@ -659,6 +705,44 @@ export class PuzzleScene extends Phaser.Scene {
     this.hintButtonLabel.setColor(isDisabled ? "#cbd5e1" : "#0f172a");
   }
 
+  private isGuessInputBlocked(): boolean {
+    return (
+      this.isClosing ||
+      this.isPuzzleCompleted ||
+      this.oxygen <= 0 ||
+      this.isGuessPending
+    );
+  }
+
+  private shouldIgnoreIncomingPuzzleUpdate(): boolean {
+    return (
+      this.isClosing ||
+      this.isPuzzleCompleted ||
+      this.oxygen <= 0 ||
+      !this.scene.isActive(this.sys.settings.key)
+    );
+  }
+
+  private startGuessPending(): void {
+    this.clearGuessPending();
+    this.isGuessPending = true;
+    this.guessResponseTimeoutTimer = this.time.delayedCall(
+      this.guessResponseTimeoutMs,
+      () => this.clearGuessPending()
+    );
+  }
+
+  private clearGuessPending(): void {
+    this.guessResponseTimeoutTimer?.remove(false);
+    this.guessResponseTimeoutTimer = undefined;
+    this.isGuessPending = false;
+  }
+
+  private clearPendingGuessState(): void {
+    this.clearGuessPending();
+    this.pendingLocalLetters.clear();
+  }
+
   private updateAttemptsText(): void {
     const attempts = Array.from(this.attemptedLetters)
       .map((letter) => letter.toUpperCase())
@@ -733,7 +817,30 @@ export class PuzzleScene extends Phaser.Scene {
     }
 
     this.isClosing = true;
+    this.clearPendingGuessState();
+    this.updateHintButtonState();
 
+    this.finishClosingPuzzle(emitPuzzleEnd);
+  }
+
+  private closePuzzleWithMessage(message: string): void {
+    if (this.isClosing) {
+      return;
+    }
+
+    this.isClosing = true;
+    this.clearPendingGuessState();
+    this.isHintPending = false;
+    this.updateHintButtonState();
+    this.setFeedback(message, 0xef4444);
+
+    this.closeTimer = this.time.delayedCall(
+      this.oxygenGameOverCloseDelayMs,
+      () => this.finishClosingPuzzle(false)
+    );
+  }
+
+  private finishClosingPuzzle(emitPuzzleEnd: boolean): void {
     if (emitPuzzleEnd && this.animalId) {
       socketManager.emitPuzzleEnd({ animalId: this.animalId });
     }
