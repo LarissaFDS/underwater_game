@@ -1,6 +1,6 @@
 
 import { ScoreCalculator } from './services/ScoreCalculator';
-import { GameRsultRepository } from './repositories/GameResultRepository';
+import { GameResultRepository } from './repositories/GameResultRepository';
 import { ScoreService } from './services/ScoreService';
 import { GameOverPayload } from './dtos/ScoreDTO';
 
