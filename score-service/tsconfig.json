@@ -9,5 +9,5 @@
       "skipLibCheck": true,
       "forceConsistentCasingInFileNames": true
     },
-    "include": ["src/**/*", "../score-service/src/models/GameResult.ts", "../score-service/src/models/GameResult.ts"]
+    "include": ["src/**/*"]
   }

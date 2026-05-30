@@ -10,7 +10,6 @@ services:
     working_dir: /app/game
     volumes:
       - ./game-service:/app/game
-      - ./shared:/app/shared
       - /app/game/node_modules
     ports:
       - "3001:3001"
@@ -18,7 +17,7 @@ services:
     environment:
       - PORT=3001
       - NODE_ENV=development
-      - PUZZLE_API_URL=http://puzzle-api:3002 #URL interna do Docker para o outro serviço
+      - PUZZLE_API_URL=http://puzzle-api:3002
 
   #----------------------------------------
   # MICROSSERVIÇO 2: PUZZLE API (REST)
@@ -29,7 +28,6 @@ services:
     working_dir: /app/puzzle
     volumes:
       - ./puzzle-api:/app/puzzle
-      - ./shared:/app/shared
       - /app/puzzle/node_modules
     ports:
       - "3002:3002"
@@ -37,6 +35,26 @@ services:
     environment:
       - PORT=3002
       - NODE_ENV=development
+
+  #----------------------------------------
+  # MICROSSERVIÇO 3: SCORE SERVICE (REST + Sockets)
+  #----------------------------------------
+  score-service:
+    image: node:20-alpine
+    container_name: ocean_score_service
+    working_dir: /app/score
+    volumes:
+      - ./score-service:/app/score
+      - /app/score/node_modules
+    ports:
+      - "3003:3003"
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - PORT=3003
+      - NODE_ENV=development
+      - GAME_SERVICE_URL=http://game-service:3001  # Escuta eventos do game-service
+    depends_on:
+      - game-service
 
   #----------------------------------------
   # CLIENT: FRONTEND
@@ -47,14 +65,15 @@ services:
     working_dir: /app/client
     volumes:
       - ./client:/app/client
-      - ./shared:/app/shared
       - /app/client/node_modules
     ports:
       - "5173:5173"
     command: sh -c "npm install && npm run dev -- --host"
     environment:
-      - VITE_SOCKET_URL=http://localhost:3001
-      - VITE_API_URL=http://localhost:3002
+      - VITE_SOCKET_URL=http://localhost:3001       # game-service (movimentação)
+      - VITE_SCORE_URL=http://localhost:3003        # score-service (resultado final)
+      - VITE_API_URL=http://localhost:3002          # puzzle-api (REST)
     depends_on:
       - game-service
       - puzzle-api
+      - score-service
