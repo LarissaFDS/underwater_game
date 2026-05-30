@@ -21,8 +21,14 @@ import { MapGenerationSystem } from "../systems/MapGenerationSystem";
 import { MovementSystem } from "../systems/MovementSystem";
 import { HUD } from "../ui/HUD";
 
+/**
+ * Data passed by MenuScene when the backend starts a room.
+ */
 type GameSceneData = Partial<GameStartPayload>;
 
+/**
+ * Local fallback used only when the backend does not include animal positions.
+ */
 const FALLBACK_ANIMALS: AnimalStatePayload[] = [
   { id: "peixe-palhaco", x: 400, y: 500, discovered: false },
   { id: "tartaruga", x: 1000, y: 500, discovered: false },
@@ -34,6 +40,14 @@ const SPAWN_X = 0;
 const SPAWN_Y = 0;
 const OBSTACLE_HIT_COOLDOWN_MS = 1000;
 
+/**
+ * Main gameplay scene.
+ *
+ * GameScene owns the visible world: generated map, local submarine, remote
+ * partner representation, animal triggers, HUDs, camera follow, and game-over
+ * overlay. Local input is emitted to the backend, while backend events update
+ * the partner and authoritative player state.
+ */
 export class GameScene extends Phaser.Scene {
   private player!: PlayerSubmarine;
   private partner!: PlayerSubmarine;
@@ -87,6 +101,9 @@ export class GameScene extends Phaser.Scene {
     super("GameScene");
   }
 
+  /**
+   * Resets transient scene state before Phaser creates the world objects.
+   */
   init(data: GameSceneData = {}): void {
     this.sceneData = data;
     this.animalsInRange.clear();
@@ -99,10 +116,15 @@ export class GameScene extends Phaser.Scene {
     this.clearPendingPuzzle();
   }
 
+  /**
+   * Builds the playable scene and binds all backend events used during a match.
+   */
   create(): void {
     this.cameras.main.setBackgroundColor("#0a1628");
     this.mapGenerationSystem = new MapGenerationSystem(this);
     this.playerIds = this.getPlayerIds();
+    // Socket.IO assigns the local id; GameScene uses it to separate local
+    // player updates from the partner's remote representation.
     this.localPlayerId = socketManager.currentSocket?.id;
 
     const mapSeed = this.getMapSeed();
@@ -112,6 +134,8 @@ export class GameScene extends Phaser.Scene {
     this.createAnimals();
 
     this.player = new PlayerSubmarine(this, MAP_WIDTH / 2, MAP_HEIGHT / 2);
+    // The partner submarine is visual-only on this client. It is positioned by
+    // backend updates rather than by local input.
     this.partner = new PlayerSubmarine(
       this,
       this.partnerTarget.x,
@@ -149,6 +173,8 @@ export class GameScene extends Phaser.Scene {
       socketManager.onPlayerMoved((payload: PlayerMovedPayload) => {
         const currentSocketId = socketManager.currentSocket?.id;
 
+        // Ignore echoed local movement so the local submarine stays controlled
+        // by immediate input instead of network interpolation.
         if (
           payload.id === this.localPlayerId ||
           payload.id === currentSocketId
@@ -171,6 +197,8 @@ export class GameScene extends Phaser.Scene {
         this.triggeredAnimalIds.add(payload.animalId);
         this.animalsInRange.clear();
         this.releasePuzzleLockOnShutdown();
+        // PuzzleScene is launched as an overlay and GameScene pauses so local
+        // movement does not continue while the player answers the minigame.
         this.scene.launch("PuzzleScene", payload);
         this.scene.pause("GameScene");
       }),
@@ -186,6 +214,7 @@ export class GameScene extends Phaser.Scene {
     );
 
     if (socketManager.currentState) {
+      // A scene may start after the backend has already sent a snapshot.
       this.applyStateUpdate(socketManager.currentState);
     }
 
@@ -198,6 +227,9 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Advances local input, proximity checks, partner interpolation, and depth UI.
+   */
   update(time: number, delta: number): void {
     if (this.canControlPlayer()) {
       const pointer = this.input.activePointer;
@@ -210,6 +242,8 @@ export class GameScene extends Phaser.Scene {
         delta
       );
 
+      // Only the local submarine emits local actions. The partner is updated
+      // from server events and never sends input from this client.
       this.player.x = Phaser.Math.Clamp(this.player.x, 0, MAP_WIDTH);
       this.player.y = Phaser.Math.Clamp(this.player.y, 0, MAP_HEIGHT);
       this.emitPlayerPosition(time);
@@ -332,6 +366,9 @@ export class GameScene extends Phaser.Scene {
     return colors[index % colors.length];
   }
 
+  /**
+   * Reports the first local entry into each undiscovered animal radius.
+   */
   private checkAnimalProximity(): void {
     if (this.isGameOver) {
       return;
@@ -366,12 +403,17 @@ export class GameScene extends Phaser.Scene {
 
       this.animalsInRange.add(animal.id);
       this.setPendingPuzzle(animal.id);
+      // The backend decides whether proximity should open a puzzle; the
+      // frontend only reports that the local player reached an animal radius.
       // Debug
       console.log("Emitting animal:approach", animal.id);
       socketManager.emitAnimalApproach({ animalId: animal.id });
     });
   }
 
+  /**
+   * Detects local obstacle contact and reports hits to the backend.
+   */
   private checkObstacleCollision(time: number): void {
     if (time - this.lastObstacleHitTime < OBSTACLE_HIT_COOLDOWN_MS) {
       return;
@@ -390,6 +432,8 @@ export class GameScene extends Phaser.Scene {
 
     this.lastObstacleHitTime = time;
     this.flashSubmarine(this.player);
+    // Obstacle damage is emitted as a local action; O2/hearts changes still
+    // come back through backend state events.
     socketManager.emitPlayerHit({ obstacleType: obstacle.obstacleType });
   }
 
@@ -423,6 +467,9 @@ export class GameScene extends Phaser.Scene {
     this.pendingPuzzleAnimalId = undefined;
   }
 
+  /**
+   * Sends throttled local movement to the backend.
+   */
   private emitPlayerPosition(time: number): void {
     if (this.isGameOver) {
       return;
@@ -432,6 +479,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    // Position emission is throttled so normal pointer movement does not flood
+    // the Socket.IO channel.
     socketManager.emitPlayerMove({
       x: this.player.x,
       y: this.player.y,
@@ -439,7 +488,12 @@ export class GameScene extends Phaser.Scene {
     this.lastMoveEmissionTime = time;
   }
 
+  /**
+   * Smooths the remote partner toward the latest backend-provided target.
+   */
   private updatePartnerPosition(delta: number): void {
+    // Remote movement is interpolated toward the latest backend target to hide
+    // network update gaps without taking ownership of partner control.
     const lerpFactor = Phaser.Math.Clamp(delta / 120, 0.08, 0.22);
     const previousX = this.partner.x;
 
@@ -489,9 +543,14 @@ export class GameScene extends Phaser.Scene {
     this.depthOverlay.setAlpha(depthProgress * DEPTH_OVERLAY_MAX_ALPHA);
   }
 
+  /**
+   * Applies the authoritative backend snapshot to HUDs and partner target data.
+   */
   private applyStateUpdate(payload: StateUpdatePayload): void {
     const localPlayerId = this.getLocalPlayerId();
 
+    // `state:update` is the source of truth for player resources. It updates
+    // the local HUD and the partner HUD separately based on the socket id.
     Object.entries(payload).forEach(([id, playerState]) => {
       const playerId = playerState.id || id;
       const isLocalPlayer =
@@ -516,7 +575,12 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Handles a single-player oxygen/heart loss flow without ending the match.
+   */
   private handlePlayerGameOver(payload: PlayerGameOverPayload): void {
+    // Player-level game over can respawn one submarine without ending the
+    // entire match. The affected socket id decides which visual object moves.
     this.applyStateUpdate(payload.state ?? payload.players ?? {});
 
     const affectedPlayerId = this.getPayloadPlayerId(payload);
@@ -542,6 +606,9 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Freezes local control and renders the final match result.
+   */
   private handleGameOver(payload: GameOverPayload): void {
     if (this.isGameOver) {
       return;

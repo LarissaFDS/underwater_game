@@ -5,6 +5,13 @@ import {
   type RoomFullPayload,
 } from "../socket/SocketManager";
 
+/**
+ * Initial matchmaking scene.
+ *
+ * The scene opens the socket connection, keeps the player on a waiting screen
+ * until the backend emits `game:start`, and blocks the transition when the
+ * backend reports that the room is already full.
+ */
 export class MenuScene extends Phaser.Scene {
   private unsubscribeSocketEvents: Array<() => void> = [];
   private roomIsFull = false;
@@ -26,6 +33,8 @@ export class MenuScene extends Phaser.Scene {
 
     socketManager.connect();
 
+    // Matchmaking remains backend-driven: the client only reacts to either a
+    // game start payload or the room-full rejection.
     this.unsubscribeSocketEvents.push(
       socketManager.onGameStart((payload: GameStartPayload) => {
         if (this.roomIsFull) {
@@ -47,6 +56,9 @@ export class MenuScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Normalizes backend room-full payload variations into user-facing text.
+   */
   private getRoomFullMessage(payload?: RoomFullPayload): string {
     if (typeof payload === "string") {
       return payload;

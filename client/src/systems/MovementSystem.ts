@@ -1,6 +1,12 @@
 import Phaser from "phaser";
 import { PlayerSubmarine } from "../entities/PlayerSubmarine";
 
+/**
+ * Local movement helper for the player-controlled submarine.
+ *
+ * Keeping pointer movement out of GameScene makes the scene focus on gameplay
+ * orchestration while this system handles speed, direction, and frame delta.
+ */
 export class MovementSystem {
   private readonly speed: number;
 
@@ -8,6 +14,9 @@ export class MovementSystem {
     this.speed = speed;
   }
 
+  /**
+   * Moves the local submarine toward a world-space pointer position.
+   */
   public moveToPointer(
     player: PlayerSubmarine,
     targetX: number,

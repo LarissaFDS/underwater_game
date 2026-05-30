@@ -1,6 +1,9 @@
 import Phaser from "phaser";
 import type { PlayerDirection } from "../../../shared/types/Player";
 
+/**
+ * Color palette used to visually distinguish submarine instances.
+ */
 interface SubmarineColors {
   body: number;
   tail: number;
@@ -15,6 +18,12 @@ const DEFAULT_COLORS: SubmarineColors = {
   window: 0x0f172a,
 };
 
+/**
+ * Phaser container that renders a player submarine.
+ *
+ * GameScene uses one instance for the locally controlled player and another
+ * instance, with alternate colors, as the remote partner representation.
+ */
 export class PlayerSubmarine extends Phaser.GameObjects.Container {
   private direction: PlayerDirection = "right";
   private readonly colors: SubmarineColors;
@@ -33,6 +42,9 @@ export class PlayerSubmarine extends Phaser.GameObjects.Container {
     scene.add.existing(this);
   }
 
+  /**
+   * Creates the simple multi-part submarine shape used by both players.
+   */
   private createSubmarineBody(): void {
     const body = this.scene.add.ellipse(0, 0, 90, 36, this.colors.body);
     const window = this.scene.add.circle(18, -2, 8, this.colors.window);
@@ -52,6 +64,9 @@ export class PlayerSubmarine extends Phaser.GameObjects.Container {
     this.add([tail, body, cabin, window]);
   }
 
+  /**
+   * Mirrors the submarine horizontally without changing its gameplay position.
+   */
   public setDirection(direction: PlayerDirection): void {
     if (this.direction === direction) {
       return;
@@ -66,6 +81,9 @@ export class PlayerSubmarine extends Phaser.GameObjects.Container {
     }
   }
 
+  /**
+   * Returns the last visual direction applied to the submarine.
+   */
   public getDirection(): PlayerDirection {
     return this.direction;
   }

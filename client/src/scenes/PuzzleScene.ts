@@ -8,14 +8,29 @@ import {
   type StateUpdatePayload,
 } from "../socket/SocketManager";
 
+/**
+ * Backend mask format accepted by the hangman minigame.
+ */
 type HiddenNameValue = string | Array<string | null | undefined>;
 
+/**
+ * Puzzle start payload plus legacy/alternative mask field names accepted from
+ * backend responses.
+ */
 type PuzzleScenePayload = PuzzleStartPayload & {
   hidden_name?: PuzzleStartPayload["hiddenName"];
   maskedName?: PuzzleStartPayload["hiddenName"];
   nameMask?: PuzzleStartPayload["hiddenName"];
 };
 
+/**
+ * Hangman-style minigame opened when the backend accepts an animal approach.
+ *
+ * The scene receives the animal id, masked name, and first hint from
+ * `puzzle:start`. It emits only local guesses/hint requests, then uses backend
+ * `puzzle:result`, `puzzle:hint`, `state:update`, and game-over events to
+ * update the word, oxygen display, and closing flow.
+ */
 export class PuzzleScene extends Phaser.Scene {
   private readonly guessResponseTimeoutMs = 1500;
   private readonly oxygenGameOverCloseDelayMs = 1200;
@@ -73,6 +88,9 @@ export class PuzzleScene extends Phaser.Scene {
     super("PuzzleScene");
   }
 
+  /**
+   * Initializes per-puzzle state from the backend-provided animal payload.
+   */
   init(data: PuzzleScenePayload): void {
     console.log("PuzzleScene data:", data);
     this.puzzleData = data;
@@ -93,6 +111,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.closeTimer = undefined;
   }
 
+  /**
+   * Builds the overlay and subscribes to puzzle-specific backend events.
+   */
   create(): void {
     const { width, height } = this.scale;
 
@@ -134,6 +155,9 @@ export class PuzzleScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Builds the modal panel that overlays the paused GameScene.
+   */
   private createPanel(width: number, height: number): void {
     this.panel = this.add.rectangle(width / 2, height / 2, 980, 560, 0x11133a, 0.88);
     this.panel.setStrokeStyle(3, 0x67e8f9, 0.78);
@@ -156,6 +180,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.panelContainer.add(closeText);
   }
 
+  /**
+   * Renders the local player's oxygen indicator for the active puzzle.
+   */
   private createSubmarineStatus(width: number, height: number): void {
     const leftX = width / 2 - 360;
     const centerY = height / 2;
@@ -223,6 +250,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.updateOxygenVisuals();
   }
 
+  /**
+   * Renders the masked animal name, hints, attempts, and feedback text.
+   */
   private createPuzzleContent(width: number, height: number): void {
     this.wordContainer = this.add.container(width / 2 + 90, height / 2 - 92);
     this.renderWord();
@@ -269,6 +299,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.panelContainer.add(this.feedbackText);
   }
 
+  /**
+   * Creates the hint request control used to emit `puzzle:hint`.
+   */
   private createHintButton(width: number, height: number): void {
     const buttonX = width / 2 + 90;
     const buttonY = height / 2 + 214;
@@ -288,6 +321,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.hintButton.on("pointerdown", () => this.requestHint());
   }
 
+  /**
+   * Sends a normalized local letter to the backend as `puzzle:guess`.
+   */
   private submitLetter(letter: string): void {
     if (
       !this.animalId ||
@@ -302,12 +338,17 @@ export class PuzzleScene extends Phaser.Scene {
 
     this.attemptedLetters.add(letter);
     this.pendingLocalLetters.add(letter);
+    // Pending letters let the scene identify local results when older backend
+    // payloads do not include an explicit player id.
     this.startGuessPending();
     this.updateAttemptsText();
     this.setFeedback(`Letra enviada: ${letter.toUpperCase()}`, 0x94a3b8);
     socketManager.emitPuzzleGuess({ animalId: this.animalId, letter });
   }
 
+  /**
+   * Requests the next hint for this animal from the backend.
+   */
   private requestHint(): void {
     if (
       !this.animalId ||
@@ -331,6 +372,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.nextHintIndex += 1;
   }
 
+  /**
+   * Applies a backend guess result to the word mask and local oxygen feedback.
+   */
   private handlePuzzleResult(payload: PuzzleResultPayload): void {
     if (this.shouldIgnoreIncomingPuzzleUpdate()) {
       return;
@@ -350,6 +394,8 @@ export class PuzzleScene extends Phaser.Scene {
     const isLocalResult = this.isLocalPuzzleResult(payloadPlayerId, letter);
     const hasSharedWordState = this.applyServerHiddenName(payload);
 
+    // Correct partner guesses can reveal shared word progress, but only local
+    // misses should apply immediate local oxygen feedback.
     if (payload.correct) {
       this.revealLetter(letter, payload.positions);
     }
@@ -386,6 +432,9 @@ export class PuzzleScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Applies a backend hint response to the local player's hint and oxygen UI.
+   */
   private handlePuzzleHint(payload: PuzzleHintPayload): void {
     if (this.shouldIgnoreIncomingPuzzleUpdate()) {
       return;
@@ -429,6 +478,10 @@ export class PuzzleScene extends Phaser.Scene {
     this.oxygenBeforeHint = undefined;
   }
 
+  /**
+   * Keeps the puzzle oxygen display synchronized with authoritative player
+   * state while the minigame is open.
+   */
   private handleStateUpdate(payload: StateUpdatePayload): void {
     if (this.shouldIgnoreIncomingPuzzleUpdate()) {
       return;
@@ -441,6 +494,9 @@ export class PuzzleScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Closes the puzzle after a player-level game-over signal.
+   */
   private handlePlayerGameOver(payload: PlayerGameOverPayload): void {
     const payloadPlayerId = this.getPayloadPlayerId(payload);
     const localPlayerId = this.getLocalPlayerId();
@@ -454,6 +510,9 @@ export class PuzzleScene extends Phaser.Scene {
     );
   }
 
+  /**
+   * Completes the animal discovery flow and notifies GameScene locally.
+   */
   private completePuzzle(completedByLocalPlayer: boolean): void {
     if (this.isPuzzleCompleted || this.isClosing) {
       return;
@@ -474,6 +533,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.time.delayedCall(1000, () => this.closePuzzle(true));
   }
 
+  /**
+   * Determines whether a puzzle result belongs to the local player.
+   */
   private isLocalPuzzleResult(
     payloadPlayerId: string | undefined,
     letter: string
@@ -490,6 +552,9 @@ export class PuzzleScene extends Phaser.Scene {
     return this.pendingLocalLetters.delete(letter);
   }
 
+  /**
+   * Extracts the local player state from an authoritative snapshot.
+   */
   private getLocalPlayerState(
     payload: StateUpdatePayload
   ): StateUpdatePayload[string] | undefined {
@@ -505,6 +570,9 @@ export class PuzzleScene extends Phaser.Scene {
     );
   }
 
+  /**
+   * Supports the player id variants currently seen in backend event payloads.
+   */
   private getPayloadPlayerId(
     payload: PuzzleResultPayload | PuzzleHintPayload | PlayerGameOverPayload
   ): string | undefined {
@@ -525,6 +593,8 @@ export class PuzzleScene extends Phaser.Scene {
   }
 
   private getInitialOxygen(): number {
+    // Oxygen is scoped per player; the puzzle starts from the local player's
+    // last cached backend state when it is available.
     const localState = this.getLocalPlayerState(socketManager.currentState ?? {});
 
     return typeof localState?.oxygen === "number"
@@ -532,6 +602,9 @@ export class PuzzleScene extends Phaser.Scene {
       : 100;
   }
 
+  /**
+   * Reveals confirmed positions returned by the backend.
+   */
   private revealLetter(letter: string, positions: number[]): void {
     const changedPositions: number[] = [];
 
@@ -553,6 +626,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.renderWord(changedPositions);
   }
 
+  /**
+   * Accepts full/shared word mask updates when the backend sends them.
+   */
   private applyServerHiddenName(payload: PuzzleResultPayload): boolean {
     const hiddenName =
       payload.hiddenName ??
@@ -598,10 +674,16 @@ export class PuzzleScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Parses the initial backend mask before rendering the word slots.
+   */
   private parseHiddenName(): string[] {
     return this.parseHiddenNameValue(this.getHiddenNameValue());
   }
 
+  /**
+   * Handles masks sent as arrays, compact token strings, or plain strings.
+   */
   private parseHiddenNameValue(hiddenName?: HiddenNameValue): string[] {
     if (Array.isArray(hiddenName)) {
       const parsed = hiddenName.map((character) => this.formatSlot(character));
@@ -668,6 +750,10 @@ export class PuzzleScene extends Phaser.Scene {
     return this.normalizeText(hint).includes("sem mais dicas");
   }
 
+  /**
+   * Removes accents before comparisons so typed letters and backend messages
+   * can be matched consistently across Portuguese animal names.
+   */
   private normalizeText(value: string): string {
     return value
       .normalize("NFD")
@@ -705,6 +791,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.hintButtonLabel.setColor(isDisabled ? "#cbd5e1" : "#0f172a");
   }
 
+  /**
+   * Blocks input while a local guess is waiting for the backend result.
+   */
   private isGuessInputBlocked(): boolean {
     return (
       this.isClosing ||
@@ -714,6 +803,9 @@ export class PuzzleScene extends Phaser.Scene {
     );
   }
 
+  /**
+   * Ignores late socket events after the scene has completed or started closing.
+   */
   private shouldIgnoreIncomingPuzzleUpdate(): boolean {
     return (
       this.isClosing ||
@@ -726,6 +818,7 @@ export class PuzzleScene extends Phaser.Scene {
   private startGuessPending(): void {
     this.clearGuessPending();
     this.isGuessPending = true;
+    // The timeout prevents a lost socket response from blocking input forever.
     this.guessResponseTimeoutTimer = this.time.delayedCall(
       this.guessResponseTimeoutMs,
       () => this.clearGuessPending()
@@ -823,6 +916,9 @@ export class PuzzleScene extends Phaser.Scene {
     this.finishClosingPuzzle(emitPuzzleEnd);
   }
 
+  /**
+   * Shows a short local/game-over message before closing the puzzle overlay.
+   */
   private closePuzzleWithMessage(message: string): void {
     if (this.isClosing) {
       return;
@@ -840,6 +936,9 @@ export class PuzzleScene extends Phaser.Scene {
     );
   }
 
+  /**
+   * Resumes GameScene and optionally emits `puzzle:end` for local closures.
+   */
   private finishClosingPuzzle(emitPuzzleEnd: boolean): void {
     if (emitPuzzleEnd && this.animalId) {
       socketManager.emitPuzzleEnd({ animalId: this.animalId });

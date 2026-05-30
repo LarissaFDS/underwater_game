@@ -5,6 +5,12 @@ const OXYGEN_BAR_HEIGHT = 16;
 const OXYGEN_BAR_PADDING = 2;
 const HEART_COUNT = 3;
 
+/**
+ * Fixed-screen player status display.
+ *
+ * GameScene creates one HUD for the local player and a scaled HUD for the
+ * partner. Both are updated from backend `state:update` snapshots.
+ */
 export class HUD extends Phaser.GameObjects.Container {
   private readonly oxygenFill: Phaser.GameObjects.Rectangle;
   private readonly hearts: Phaser.GameObjects.Arc[];
@@ -42,6 +48,9 @@ export class HUD extends Phaser.GameObjects.Container {
     this.add([oxygenBackground, this.oxygenFill, ...this.hearts]);
   }
 
+  /**
+   * Updates the oxygen bar with a small tween for backend state changes.
+   */
   setOxygen(value: number): void {
     const clampedValue = Phaser.Math.Clamp(value, 0, 100);
     const targetWidth =
@@ -56,6 +65,9 @@ export class HUD extends Phaser.GameObjects.Container {
     });
   }
 
+  /**
+   * Updates the visible heart count for the player represented by this HUD.
+   */
   setHearts(count: number): void {
     const clampedCount = Phaser.Math.Clamp(Math.floor(count), 0, HEART_COUNT);
 
@@ -65,6 +77,9 @@ export class HUD extends Phaser.GameObjects.Container {
     });
   }
 
+  /**
+   * Creates the fixed number of heart indicators used by the game rules.
+   */
   private createHearts(scene: Phaser.Scene): Phaser.GameObjects.Arc[] {
     return Array.from({ length: HEART_COUNT }, (_, index) => {
       const heart = scene.add.circle(12 + index * 28, 34, 9, 0xff2d2d, 1);

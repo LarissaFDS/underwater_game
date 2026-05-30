@@ -7,11 +7,20 @@ import {
   SEAWEED_CONFIG,
 } from "../data/mapConfig";
 
+/**
+ * Collision bounds exposed to GameScene for local obstacle hit detection.
+ */
 export interface MapObstacleBounds {
   obstacleType: string;
   bounds: Phaser.Geom.Rectangle;
 }
 
+/**
+ * Seeded map generator for the Phaser world.
+ *
+ * The system creates the static background grid, obstacle rocks, and decorative
+ * seaweed. Only rock bounds are exposed for collision checks.
+ */
 export class MapGenerationSystem {
   private seed = 1;
   private readonly obstacles: Array<{
@@ -21,6 +30,9 @@ export class MapGenerationSystem {
 
   constructor(private readonly scene: Phaser.Scene) {}
 
+  /**
+   * Generates a deterministic map from the backend-provided room seed.
+   */
   public generate(seed: number): void {
     this.seed = seed || 1;
     this.obstacles.length = 0;
@@ -29,6 +41,9 @@ export class MapGenerationSystem {
     this.createSeaweed();
   }
 
+  /**
+   * Returns current obstacle bounds for GameScene collision checks.
+   */
   public getObstacleBounds(): MapObstacleBounds[] {
     return this.obstacles.map((obstacle) => ({
       obstacleType: obstacle.obstacleType,
@@ -36,6 +51,9 @@ export class MapGenerationSystem {
     }));
   }
 
+  /**
+   * Draws the ocean background and tile grid covering the whole map area.
+   */
   private createBaseGrid(): void {
     const graphics = this.scene.add.graphics();
 
@@ -53,6 +71,9 @@ export class MapGenerationSystem {
     }
   }
 
+  /**
+   * Creates collidable rock obstacles and keeps their bounds available.
+   */
   private createRocks(): void {
     const count = this.randomInt(ROCK_CONFIG.minCount, ROCK_CONFIG.maxCount);
 
@@ -81,6 +102,9 @@ export class MapGenerationSystem {
     }
   }
 
+  /**
+   * Creates non-collidable seaweed decoration.
+   */
   private createSeaweed(): void {
     const count = this.randomInt(
       SEAWEED_CONFIG.minCount,
@@ -117,6 +141,9 @@ export class MapGenerationSystem {
     }
   }
 
+  /**
+   * Linear congruential generator used so the same seed creates the same map.
+   */
   private random(): number {
     this.seed = (1664525 * this.seed + 1013904223) >>> 0;
     return this.seed / 4294967296;
