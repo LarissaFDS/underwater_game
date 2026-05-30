@@ -18,8 +18,7 @@ export class GameServer {
     this.server = http.createServer(this.app);
     this.room = new GameRoom(2);
     this.roomName = 'ocean_room';
-    this.puzzleApiUrl =
-      process.env.PUZZLE_API_URL || 'http://localhost:3002';
+    this.puzzleApiUrl = process.env.PUZZLE_API_URL || 'http://localhost:3002';
 
     this.io = new Server(this.server, {
       cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -30,8 +29,7 @@ export class GameServer {
     this.setupSocketHandlers();
   }
 
-  // ── HTTP ──────────────────────────────────────────────
-
+  //HTTP
   private setupMiddlewares(): void {
     this.app.use(cors());
     this.app.use(express.json());
@@ -43,8 +41,7 @@ export class GameServer {
     });
   }
 
-  // ── Catalog ───────────────────────────────────────────
-
+  //Catalog
   private async loadCatalog(): Promise<void> {
     try {
       const response = await fetch(`${this.puzzleApiUrl}/api/animals`);
@@ -52,14 +49,26 @@ export class GameServer {
       this.room.setCatalog(animals);
       console.log(`Catálogo carregado com ${animals.length} animais.`);
     } catch (error) {
-      console.error(
-        'Erro ao conectar com a Puzzle API. Ela está rodando?',
-        error
-      );
+      console.error('Erro ao conectar com a Puzzle API.', error);
     }
   }
 
-  // ── Game logic ────────────────────────────────────────
+  //Game Over
+  private emitGameOver(
+    winnerId: string | null,
+    reason: 'elimination' | 'exploration' //um jogador morreu 2x ou todos os animais foram descobertos
+  ): void {
+    const discoveredAnimals = this.room.getDiscoveredAnimalsPayload();
+
+    this.io.to(this.roomName).emit(SocketEvents.GAME_OVER, {
+      winner: winnerId,
+      reason,
+      players: this.room.getPlayers(),
+      discoveredAnimals,
+    });
+
+    console.log(`game:over emitido — reason: ${reason}, winner: ${winnerId}`);
+  }
 
   private checkPlayerDeath(playerId: string): void {
     const player = this.room.getPlayer(playerId);
@@ -68,38 +77,37 @@ export class GameServer {
     player.deathCount += 1;
 
     if (player.deathCount >= 2) {
-      console.log(`Game Over definitivo para ${playerId}`);
       const winnerId = this.room
         .getPlayerIds()
-        .find((id) => id !== playerId);
-      this.io
-        .to(this.roomName)
-        .emit(SocketEvents.GAME_OVER, { winner: winnerId });
+        .find((id) => id !== playerId) ?? null;
+
+      this.emitGameOver(winnerId, 'elimination');
     } else {
-      console.log(`Primeira morte de ${playerId}. Voltando ao spawn.`);
       player.reset();
       this.room.clearActivePuzzle();
 
-      this.io
-        .to(this.roomName)
-        .emit(SocketEvents.PLAYER_GAMEOVER, { playerId });
-      this.io
-        .to(this.roomName)
-        .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+      this.io.to(this.roomName).emit(SocketEvents.PLAYER_GAMEOVER, { playerId });
+      this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
     }
   }
 
-  // ── Socket handlers ───────────────────────────────────
+  private checkAllAnimalsDiscovered(): void {
+    if (!this.room.allAnimalsDiscovered()) return;
 
+    //Ganha quem tiver mais animais descobertos; empate → null
+    const winnerId = this.room.getLeadingPlayerId();
+    this.emitGameOver(winnerId, 'exploration');
+  }
+
+  //Socket handlers
   private setupSocketHandlers(): void {
     this.io.on('connection', (socket: Socket) => {
-      console.log(`${SocketEvents.PLAYER_JOIN} - ID: ${socket.id}`);
+      console.log(`Conexão: ${socket.id}`);
 
       const clientsInRoom =
         this.io.sockets.adapter.rooms.get(this.roomName)?.size || 0;
 
       if (clientsInRoom >= this.room.maxPlayers) {
-        console.log(`Conexão rejeitada: Sala cheia (${socket.id})`);
         socket.emit(SocketEvents.ROOM_FULL, { error: 'A sala já está cheia.' });
         socket.disconnect();
         return;
@@ -112,8 +120,6 @@ export class GameServer {
         this.loadCatalog().then(() => {
           const seed = this.room.generateSeed();
           this.room.initializeAnimals();
-
-          console.log('Sala cheia! Jogo iniciado. Animais posicionados.');
 
           this.io.to(this.roomName).emit(SocketEvents.GAME_START, {
             seed,
@@ -131,57 +137,50 @@ export class GameServer {
   }
 
   private registerPlayerEvents(socket: Socket): void {
-    socket.on(
-      SocketEvents.PLAYER_MOVE,
-      (data: { x: number; y: number }) => {
-        const player = this.room.getPlayer(socket.id);
-        if (!player) return;
+    socket.on(SocketEvents.PLAYER_MOVE, (data: { x: number; y: number }) => {
+      const player = this.room.getPlayer(socket.id);
+      if (!player) return;
 
-        player.x = data.x;
-        player.y = data.y;
+      player.x = data.x;
+      player.y = data.y;
 
-        socket.to(this.roomName).emit(SocketEvents.PLAYER_MOVED, {
-          id: socket.id,
-          x: data.x,
-          y: data.y,
+      socket.to(this.roomName).emit(SocketEvents.PLAYER_MOVED, {
+        id: socket.id,
+        x: data.x,
+        y: data.y,
+      });
+    });
+
+    socket.on(SocketEvents.ANIMAL_APPROACH, async (data: { animalId: string }) => {
+      if (this.room.getActivePuzzleAnimalId() !== null) return;
+
+      const { animalId } = data;
+      const roomAnimal = this.room.getAnimal(animalId);
+      const catalogData = this.room.findCatalogAnimal(animalId);
+
+      if (!roomAnimal || !catalogData || roomAnimal.discovered) return;
+
+      this.room.startPuzzle(animalId);
+      //Registra início do timer no AnimalState
+      roomAnimal.startPuzzle();
+
+      try {
+        const hintResponse = await fetch(`${this.puzzleApiUrl}/api/puzzle/hint`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ animalId, hintIndex: 0 }),
         });
+        const { hint } = await hintResponse.json();
+
+        this.io.to(this.roomName).emit(SocketEvents.PUZZLE_START, {
+          animalId,
+          hiddenName: catalogData.hiddenName,
+          hint1: hint,
+        });
+      } catch (error) {
+        console.error('Erro ao buscar dica inicial:', error);
       }
-    );
-
-    socket.on(
-      SocketEvents.ANIMAL_APPROACH,
-      async (data: { animalId: string }) => {
-        if (this.room.getActivePuzzleAnimalId() !== null) return;
-
-        const { animalId } = data;
-        const roomAnimal = this.room.getAnimal(animalId);
-        const catalogData = this.room.findCatalogAnimal(animalId);
-
-        if (!roomAnimal || !catalogData || roomAnimal.discovered) return;
-
-        this.room.startPuzzle(animalId);
-
-        try {
-          const hintResponse = await fetch(
-            `${this.puzzleApiUrl}/api/puzzle/hint`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ animalId, hintIndex: 0 }),
-            }
-          );
-          const { hint } = await hintResponse.json();
-
-          this.io.to(this.roomName).emit(SocketEvents.PUZZLE_START, {
-            animalId,
-            hiddenName: catalogData.hiddenName,
-            hint1: hint,
-          });
-        } catch (error) {
-          console.error('Erro ao buscar dica inicial na Puzzle API:', error);
-        }
-      }
-    );
+    });
 
     socket.on(SocketEvents.PUZZLE_END, (data: { animalId?: string }) => {
       if (!this.room.getActivePuzzleAnimalId()) return;
@@ -192,94 +191,82 @@ export class GameServer {
       if (this.room.allPlayersEndedPuzzle()) {
         if (data.animalId) {
           const animal = this.room.getAnimal(data.animalId);
-          if (animal) animal.discovered = true;
+          if (animal) {
+            animal.discovered = true;
+            animal.discoveredBy = socket.id;
+          }
         }
         this.room.clearActivePuzzle();
+        this.checkAllAnimalsDiscovered();
       }
     });
 
-    socket.on(
-      SocketEvents.PLAYER_HIT,
-      (_data: { obstacleType: string }) => {
-        const player = this.room.getPlayer(socket.id);
-        if (!player) return;
+    socket.on(SocketEvents.PLAYER_HIT, (_data: { obstacleType: string }) => {
+      const player = this.room.getPlayer(socket.id);
+      if (!player) return;
 
-        player.hearts -= 1;
-        this.io
-          .to(this.roomName)
-          .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+      player.hearts -= 1;
+      this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+      this.checkPlayerDeath(socket.id);
+    });
+
+    socket.on(SocketEvents.PUZZLE_GUESS, async (data: { animalId: string; letter: string }) => {
+      const player = this.room.getPlayer(socket.id);
+      if (!player || !data.letter) return;
+
+      try {
+        const response = await fetch(`${this.puzzleApiUrl}/api/puzzle/guess`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        const result = await response.json();
+
+        if (!result.correct) {
+          player.oxygen -= 10;
+          //Registra erro no AnimalState para o score
+          const animal = this.room.getAnimal(data.animalId);
+          animal?.registerWrongGuess();
+        }
+
+        this.io.to(this.roomName).emit(SocketEvents.PUZZLE_RESULT, {
+          correct: result.correct,
+          positions: result.positions,
+          letter: data.letter.toLowerCase(),
+        });
+
+        this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
         this.checkPlayerDeath(socket.id);
+      } catch (error) {
+        console.error('Erro ao validar chute:', error);
       }
-    );
+    });
 
-    socket.on(
-      SocketEvents.PUZZLE_GUESS,
-      async (data: { animalId: string; letter: string }) => {
-        const player = this.room.getPlayer(socket.id);
-        if (!player || !data.letter) return;
+    socket.on(SocketEvents.PUZZLE_HINT, async (data: { animalId: string; hintIndex: number }) => {
+      const player = this.room.getPlayer(socket.id);
+      if (!player) return;
 
-        try {
-          const response = await fetch(
-            `${this.puzzleApiUrl}/api/puzzle/guess`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(data),
-            }
-          );
-          const result = await response.json();
+      try {
+        const response = await fetch(`${this.puzzleApiUrl}/api/puzzle/hint`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        const result = await response.json();
 
-          if (!result.correct) player.oxygen -= 10;
-
-          this.io.to(this.roomName).emit(SocketEvents.PUZZLE_RESULT, {
-            correct: result.correct,
-            positions: result.positions,
-            letter: data.letter.toLowerCase(),
-          });
-
-          this.io
-            .to(this.roomName)
-            .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
-          this.checkPlayerDeath(socket.id);
-        } catch (error) {
-          console.error('Erro ao validar chute na Puzzle API:', error);
+        if (result.hint && result.hint !== 'Sem mais dicas.') {
+          player.oxygen -= 5;
         }
+
+        socket.emit(SocketEvents.PUZZLE_HINT, { hint: result.hint });
+        this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+        this.checkPlayerDeath(socket.id);
+      } catch (error) {
+        console.error('Erro ao solicitar dica:', error);
       }
-    );
+    });
 
-    socket.on(
-      SocketEvents.PUZZLE_HINT,
-      async (data: { animalId: string; hintIndex: number }) => {
-        const player = this.room.getPlayer(socket.id);
-        if (!player) return;
-
-        try {
-          const response = await fetch(
-            `${this.puzzleApiUrl}/api/puzzle/hint`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(data),
-            }
-          );
-          const result = await response.json();
-
-          if (result.hint && result.hint !== 'Sem mais dicas.') {
-            player.oxygen -= 5;
-          }
-
-          socket.emit(SocketEvents.PUZZLE_HINT, { hint: result.hint });
-          this.io
-            .to(this.roomName)
-            .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
-          this.checkPlayerDeath(socket.id);
-        } catch (error) {
-          console.error('Erro ao solicitar dica na Puzzle API:', error);
-        }
-      }
-    );
-
-    socket.on('game:restart', () => {
+    socket.on(SocketEvents.GAME_RESTART, () => {
       if (this.room.playerCount < this.room.maxPlayers) return;
 
       this.room.reset();
@@ -298,7 +285,7 @@ export class GameServer {
     });
 
     socket.on('disconnect', () => {
-      console.log(`${SocketEvents.PLAYER_DISCONNECT} - ID: ${socket.id}`);
+      console.log(`Desconectado: ${socket.id}`);
 
       const hadActivePuzzle = this.room.getActivePuzzleAnimalId() !== null;
       this.room.removePlayer(socket.id);
@@ -312,8 +299,7 @@ export class GameServer {
     });
   }
 
-  // ── Entry point ───────────────────────────────────────
-
+  //Entry point
   public listen(port: number): void {
     this.server.listen(port, '0.0.0.0', () => {
       console.log(`🎮 Game Service (Socket) rodando na porta ${port}`);
