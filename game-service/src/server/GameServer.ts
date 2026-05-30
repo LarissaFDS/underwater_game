@@ -11,6 +11,8 @@ export class GameServer {
   private readonly io: Server;
   private readonly room: GameRoom;
   private readonly roomName: string;
+  private readonly serviceRoomName: string;
+  private readonly playerSocketsByClientInstanceId = new Map<string, string>();
   private readonly puzzleApiUrl: string;
 
   constructor() {
@@ -18,6 +20,7 @@ export class GameServer {
     this.server = http.createServer(this.app);
     this.room = new GameRoom(2);
     this.roomName = 'ocean_room';
+    this.serviceRoomName = 'internal_services';
     this.puzzleApiUrl = process.env.PUZZLE_API_URL || 'http://localhost:3002';
 
     this.io = new Server(this.server, {
@@ -56,18 +59,29 @@ export class GameServer {
   //Game Over
   private emitGameOver(
     winnerId: string | null,
-    reason: 'elimination' | 'exploration' //um jogador morreu 2x ou todos os animais foram descobertos
+    reason: 'elimination' | 'exploration', //um jogador morreu 2x ou todos os animais foram descobertos
+    eliminationReason?: 'oxygen' | 'hearts',
+    eliminatedPlayerId?: string
   ): void {
     const discoveredAnimals = this.room.getDiscoveredAnimalsPayload();
 
-    this.io.to(this.roomName).emit(SocketEvents.GAME_OVER, {
+    const payload = {
       winner: winnerId,
       reason,
+      eliminationReason,
+      eliminatedPlayerId,
       players: this.room.getPlayers(),
       discoveredAnimals,
-    });
+    };
 
-    console.log(`game:over emitido — reason: ${reason}, winner: ${winnerId}`);
+    this.io
+      .to(this.roomName)
+      .to(this.serviceRoomName)
+      .emit(SocketEvents.GAME_OVER, payload);
+
+    console.log(
+      `game:over emitido — reason: ${reason}, winner: ${winnerId}, eliminatedPlayerId: ${eliminatedPlayerId ?? 'n/a'}, eliminationReason: ${eliminationReason ?? 'n/a'}`
+    );
   }
 
   private checkPlayerDeath(playerId: string): void {
@@ -75,15 +89,23 @@ export class GameServer {
     if (!player || !player.isDead()) return;
 
     player.deathCount += 1;
+    console.log(`Morte registrada para ${playerId}. deathCount=${player.deathCount}`);
 
     if (player.deathCount >= 2) {
       const winnerId = this.room
         .getPlayerIds()
         .find((id) => id !== playerId) ?? null;
 
-      this.emitGameOver(winnerId, 'elimination');
+      this.emitGameOver(
+        winnerId,
+        'elimination',
+        this.getEliminationReason(player),
+        playerId
+      );
     } else {
-      player.reset();
+      // First death is only an individual respawn. Match reset still uses
+      // PlayerState.reset(), which clears deathCount for a new game.
+      player.respawn();
       this.room.clearActivePuzzle();
 
       this.io.to(this.roomName).emit(SocketEvents.PLAYER_GAMEOVER, { playerId });
@@ -102,12 +124,32 @@ export class GameServer {
   //Socket handlers
   private setupSocketHandlers(): void {
     this.io.on('connection', (socket: Socket) => {
-      console.log(`Conexão: ${socket.id}`);
+      console.log('Socket conectado:', socket.id);
+      console.log('Auth recebida:', socket.handshake.auth);
+      console.log('Players antes:', this.room.getPlayerIds());
+      console.log('Player count antes:', this.room.playerCount);
 
-      const clientsInRoom =
-        this.io.sockets.adapter.rooms.get(this.roomName)?.size || 0;
+      const { clientType, serviceName, clientInstanceId } = socket.handshake
+        .auth as {
+        clientType?: string;
+        serviceName?: string;
+        clientInstanceId?: string;
+      };
 
-      if (clientsInRoom >= this.room.maxPlayers) {
+      if (clientType === 'service') {
+        console.log(`Microsserviço conectado: ${serviceName ?? socket.id}`);
+        socket.join(this.serviceRoomName);
+        return;
+      }
+
+      if (clientInstanceId) {
+        socket.data.clientInstanceId = clientInstanceId;
+        this.replaceDuplicatePlayerSocket(clientInstanceId, socket.id);
+      }
+
+      // Sockets de microsserviços e conexões duplicadas da mesma aba não entram
+      // no matchmaking; apenas jogadores reais mantidos em GameRoom contam.
+      if (this.room.playerCount >= this.room.maxPlayers) {
         socket.emit(SocketEvents.ROOM_FULL, { error: 'A sala já está cheia.' });
         socket.disconnect();
         return;
@@ -115,12 +157,18 @@ export class GameServer {
 
       socket.join(this.roomName);
       this.room.addPlayer(socket.id);
+      if (clientInstanceId) {
+        this.playerSocketsByClientInstanceId.set(clientInstanceId, socket.id);
+      }
+      console.log('Player adicionado:', socket.id);
+      console.log('Players depois:', this.room.getPlayerIds());
+      console.log('Player count depois:', this.room.playerCount);
 
-      if (clientsInRoom + 1 === this.room.maxPlayers) {
+      if (this.room.playerCount === this.room.maxPlayers) {
         this.loadCatalog().then(() => {
           const seed = this.room.generateSeed();
           this.room.initializeAnimals();
-
+          console.log('Emitindo game:start com players:', this.room.getPlayerIds());
           this.io.to(this.roomName).emit(SocketEvents.GAME_START, {
             seed,
             players: this.room.getPlayerIds(),
@@ -134,6 +182,30 @@ export class GameServer {
 
       this.registerPlayerEvents(socket);
     });
+  }
+
+  private getEliminationReason(player: { oxygen: number; hearts: number }): 'oxygen' | 'hearts' {
+    return player.oxygen <= 0 ? 'oxygen' : 'hearts';
+  }
+
+  private replaceDuplicatePlayerSocket(
+    clientInstanceId: string,
+    nextSocketId: string
+  ): void {
+    const previousSocketId = this.playerSocketsByClientInstanceId.get(
+      clientInstanceId
+    );
+
+    if (!previousSocketId || previousSocketId === nextSocketId) {
+      return;
+    }
+
+    console.log(
+      `Substituindo socket duplicado da mesma aba: ${previousSocketId} -> ${nextSocketId}`
+    );
+
+    this.room.removePlayer(previousSocketId);
+    this.io.sockets.sockets.get(previousSocketId)?.disconnect(true);
   }
 
   private registerPlayerEvents(socket: Socket): void {
@@ -289,6 +361,7 @@ export class GameServer {
 
       const hadActivePuzzle = this.room.getActivePuzzleAnimalId() !== null;
       this.room.removePlayer(socket.id);
+      this.removePlayerSocketMapping(socket);
 
       if (this.room.playerCount === 0) {
         this.room.clearAnimals();
@@ -297,6 +370,17 @@ export class GameServer {
         this.room.clearActivePuzzle();
       }
     });
+  }
+
+  private removePlayerSocketMapping(socket: Socket): void {
+    const clientInstanceId = socket.data.clientInstanceId;
+
+    if (
+      typeof clientInstanceId === 'string' &&
+      this.playerSocketsByClientInstanceId.get(clientInstanceId) === socket.id
+    ) {
+      this.playerSocketsByClientInstanceId.delete(clientInstanceId);
+    }
   }
 
   //Entry point

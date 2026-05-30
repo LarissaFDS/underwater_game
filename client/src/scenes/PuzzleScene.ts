@@ -70,11 +70,6 @@ export class PuzzleScene extends Phaser.Scene {
       return;
     }
 
-    if (event.key === "Escape") {
-      this.closePuzzle(true);
-      return;
-    }
-
     const letter = this.normalizeLetter(event.key);
 
     if (!/^[a-z]$/.test(letter)) {
@@ -171,13 +166,6 @@ export class PuzzleScene extends Phaser.Scene {
       .setOrigin(0.5);
     this.panelContainer.add(title);
 
-    const closeText = this.add
-      .text(width / 2, height / 2 + 244, "ESC fecha temporariamente para teste", {
-        fontSize: "15px",
-        color: "#94a3b8",
-      })
-      .setOrigin(0.5);
-    this.panelContainer.add(closeText);
   }
 
   /**

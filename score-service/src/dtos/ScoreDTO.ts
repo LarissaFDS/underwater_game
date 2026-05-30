@@ -2,6 +2,8 @@
 export interface GameOverPayload {
     winner: string | null;
     reason: 'elimination' | 'exploration';
+    eliminationReason?: 'oxygen' | 'hearts';
+    eliminatedPlayerId?: string;
     players: Record<string, RawPlayerState>;
     discoveredAnimals: DiscoveredAnimalRaw[];
   }
@@ -43,6 +45,8 @@ export interface GameOverPayload {
   export interface GameResultPayload {
     winner: string | null;
     reason: 'elimination' | 'exploration';
+    eliminationReason?: 'oxygen' | 'hearts';
+    eliminatedPlayerId?: string;
     animalScores: AnimalScoreEntry[];
     playerSummaries: PlayerScoreSummary[];
   }

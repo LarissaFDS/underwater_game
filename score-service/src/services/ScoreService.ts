@@ -15,8 +15,10 @@ export class ScoreService {
       this.calculator.calculateAnimalScore(raw)
     );
 
-    const playerSummaries =
-      this.calculator.calculatePlayerSummaries(animalScores);
+    const playerSummaries = this.includePlayersWithoutAnimalScores(
+      this.calculator.calculatePlayerSummaries(animalScores),
+      payload.players
+    );
 
     const result = new GameResult(
       payload.winner,
@@ -30,6 +32,8 @@ export class ScoreService {
     return {
       winner: result.winner,
       reason: result.reason,
+      eliminationReason: payload.eliminationReason,
+      eliminatedPlayerId: payload.eliminatedPlayerId,
       animalScores: result.animalScores,
       playerSummaries: result.playerSummaries,
     };
@@ -45,5 +49,26 @@ export class ScoreService {
 
   getResultById(id: string): GameResult | undefined {
     return this.repo.findById(id);
+  }
+
+  private includePlayersWithoutAnimalScores(
+    playerSummaries: GameResultPayload['playerSummaries'],
+    players: GameOverPayload['players']
+  ): GameResultPayload['playerSummaries'] {
+    const knownPlayers = new Set(
+      playerSummaries.map((summary) => summary.playerId)
+    );
+
+    Object.keys(players).forEach((playerId) => {
+      if (!knownPlayers.has(playerId)) {
+        playerSummaries.push({
+          playerId,
+          totalPoints: 0,
+          animalsFound: 0,
+        });
+      }
+    });
+
+    return playerSummaries;
   }
 }

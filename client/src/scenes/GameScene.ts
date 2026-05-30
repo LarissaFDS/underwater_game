@@ -17,6 +17,10 @@ import {
   type PuzzleStartPayload,
   type StateUpdatePayload,
 } from "../socket/SocketManager";
+import {
+  scoreSocketManager,
+  type GameResultPayload,
+} from "../socket/ScoreSocketManager";
 import { MapGenerationSystem } from "../systems/MapGenerationSystem";
 import { MovementSystem } from "../systems/MovementSystem";
 import { HUD } from "../ui/HUD";
@@ -44,9 +48,9 @@ const OBSTACLE_HIT_COOLDOWN_MS = 1000;
  * Main gameplay scene.
  *
  * GameScene owns the visible world: generated map, local submarine, remote
- * partner representation, animal triggers, HUDs, camera follow, and game-over
- * overlay. Local input is emitted to the backend, while backend events update
- * the partner and authoritative player state.
+ * partner representation, animal triggers, HUDs, and camera follow. Local
+ * input is emitted to the game-service, while score-service results are only
+ * displayed by EndScene and never calculated in the frontend.
  */
 export class GameScene extends Phaser.Scene {
   private player!: PlayerSubmarine;
@@ -73,7 +77,7 @@ export class GameScene extends Phaser.Scene {
   private pendingPuzzleTimeout?: Phaser.Time.TimerEvent;
   private lastObstacleHitTime = -OBSTACLE_HIT_COOLDOWN_MS;
   private isGameOver = false;
-  private gameOverOverlay?: Phaser.GameObjects.Container;
+  private hasOpenedEndScene = false;
   private hasWindowFocus = true;
   private isPageVisible = true;
   private isPointerInsideCanvas = true;
@@ -110,9 +114,8 @@ export class GameScene extends Phaser.Scene {
     this.triggeredAnimalIds.clear();
     this.isPuzzleActive = false;
     this.isGameOver = false;
+    this.hasOpenedEndScene = false;
     this.lastObstacleHitTime = -OBSTACLE_HIT_COOLDOWN_MS;
-    this.gameOverOverlay?.destroy();
-    this.gameOverOverlay = undefined;
     this.clearPendingPuzzle();
   }
 
@@ -210,6 +213,9 @@ export class GameScene extends Phaser.Scene {
       }),
       socketManager.onGameOver((payload: GameOverPayload) => {
         this.handleGameOver(payload);
+      }),
+      scoreSocketManager.onGameResult((payload: GameResultPayload) => {
+        this.handleGameResult(payload);
       })
     );
 
@@ -607,51 +613,48 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Freezes local control and renders the final match result.
+   * Freezes local control while the score-service calculates the final result.
+   *
+   * The game-service only tells the frontend that the match is definitely
+   * over. Final score and winner presentation wait for `game:result`, because
+   * score-service is the source of truth for match scoring.
    */
-  private handleGameOver(payload: GameOverPayload): void {
+  private handleGameOver(_payload: GameOverPayload): void {
     if (this.isGameOver) {
       return;
     }
 
     this.isGameOver = true;
+    this.closePuzzleForFinalGameOver();
+    this.scene.pause("GameScene");
+  }
 
-    const winnerId = payload.winnerId ?? payload.winner;
-    const localPlayerId = this.getLocalPlayerId();
-    const winnerMessage =
-      winnerId === undefined
-        ? "Fim de jogo"
-        : winnerId === localPlayerId
-          ? "Voce venceu!"
-          : "Seu parceiro venceu!";
-    const detailMessage = winnerId ? `Vencedor: ${winnerId}` : "";
+  /**
+   * Opens EndScene with the backend-calculated result from score-service.
+   *
+   * GameScene transitions the visual flow only; it does not calculate or
+   * mutate scoring fields, which keeps both clients aligned with score-service.
+   */
+  private handleGameResult(payload: GameResultPayload): void {
+    if (this.hasOpenedEndScene) {
+      return;
+    }
 
-    const { width, height } = this.scale;
-    const overlay = this.add.container(0, 0);
-    overlay.setScrollFactor(0);
-    overlay.setDepth(2000);
+    this.hasOpenedEndScene = true;
+    this.isGameOver = true;
+    this.closePuzzleForFinalGameOver();
+    this.scene.launch("EndScene", payload);
+    this.scene.pause("GameScene");
+  }
 
-    const background = this.add
-      .rectangle(0, 0, width, height, 0x020617, 0.78)
-      .setOrigin(0);
-    const title = this.add
-      .text(width / 2, height / 2 - 42, winnerMessage, {
-        fontSize: "44px",
-        color: "#f8fafc",
-        align: "center",
-      })
-      .setOrigin(0.5);
-    const subtitle = this.add
-      .text(width / 2, height / 2 + 24, detailMessage, {
-        fontSize: "20px",
-        color: "#bae6fd",
-        align: "center",
-        wordWrap: { width: width - 120 },
-      })
-      .setOrigin(0.5);
+  private closePuzzleForFinalGameOver(): void {
+    this.clearPendingPuzzle();
+    this.isPuzzleActive = false;
+    this.animalsInRange.clear();
 
-    overlay.add([background, title, subtitle]);
-    this.gameOverOverlay = overlay;
+    if (this.scene.isActive("PuzzleScene") || this.scene.isPaused("PuzzleScene")) {
+      this.scene.stop("PuzzleScene");
+    }
   }
 
   private getLocalPlayerId(): string | undefined {

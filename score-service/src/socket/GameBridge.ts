@@ -18,6 +18,10 @@ export class GameBridge {
     this.client = ioClient(this.gameServiceUrl, {
       reconnection: true,
       reconnectionDelay: 2000,
+      auth: {
+        clientType: 'service',
+        serviceName: 'score-service',
+      },
     });
 
     this.client.on('connect', () => {
@@ -42,7 +46,9 @@ export class GameBridge {
 
     //game-service emite 'game:over' com GameOverPayload
     this.client.on('game:over', (payload: GameOverPayload) => {
-      console.log('game:over recebido. Calculando pontuação...');
+      console.log(
+        `game:over recebido. reason=${payload.reason}, winner=${payload.winner}`
+      );
 
       try {
         const result = this.scoreService.processGameOver(payload);

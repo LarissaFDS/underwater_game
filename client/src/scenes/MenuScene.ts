@@ -31,6 +31,7 @@ export class MenuScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    console.log("[MenuScene] socketManager.connect()");
     socketManager.connect();
 
     // Matchmaking remains backend-driven: the client only reacts to either a
@@ -38,6 +39,15 @@ export class MenuScene extends Phaser.Scene {
     this.unsubscribeSocketEvents.push(
       socketManager.onGameStart((payload: GameStartPayload) => {
         if (this.roomIsFull) {
+          return;
+        }
+
+        if (this.getPlayerCount(payload) < 2) {
+          console.warn(
+            "[MenuScene] Ignoring game:start without two real players",
+            payload
+          );
+          statusText.setText("Aguardando segundo jogador...");
           return;
         }
 
@@ -65,5 +75,11 @@ export class MenuScene extends Phaser.Scene {
     }
 
     return payload?.message ?? "Sala cheia. Tente novamente mais tarde.";
+  }
+
+  private getPlayerCount(payload: GameStartPayload): number {
+    const players = payload.playerIds ?? payload.ids ?? payload.players;
+
+    return players?.length ?? 0;
   }
 }

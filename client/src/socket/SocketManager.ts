@@ -121,8 +121,10 @@ export interface PlayerGameOverPayload {
 }
 
 export interface GameOverPayload {
-  winner?: string;
-  winnerId?: string;
+  winner?: string | null;
+  winnerId?: string | null;
+  reason?: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -156,6 +158,7 @@ interface ClientToServerEvents {
   "puzzle:guess": (payload: PuzzleGuessPayload) => void;
   "puzzle:hint": (payload: PuzzleHintRequestPayload) => void;
   "player:hit": (payload: PlayerHitPayload) => void;
+  "game:restart": () => void;
 }
 
 /**
@@ -167,6 +170,7 @@ interface ClientToServerEvents {
  */
 export class SocketManager {
   private static instance: SocketManager;
+  private static readonly clientInstanceStorageKey = "underwaterGameClientInstanceId";
   private socket?: Socket<ServerToClientEvents, ClientToServerEvents>;
   private lastStateUpdate?: StateUpdatePayload;
   private isStateCacheBound = false;
@@ -188,8 +192,23 @@ export class SocketManager {
    * Opens or reuses the Socket.IO connection to the backend service.
    */
   public connect(): Socket<ServerToClientEvents, ClientToServerEvents> {
+    const url = this.getServerUrl();
+
     if (!this.socket) {
-      this.socket = io(this.getServerUrl());
+      console.log("[SocketManager] connecting to game-service", url);
+      this.socket = io(url, {
+        auth: {
+          clientType: "player",
+          clientInstanceId: this.getClientInstanceId(),
+        },
+      });
+      this.socket.on("connect", () => {
+        console.log(
+          "[SocketManager] connected to game-service",
+          this.socket?.id,
+          url
+        );
+      });
       this.bindStateCache();
     } else if (!this.socket.connected) {
       this.socket.connect();
@@ -240,6 +259,17 @@ export class SocketManager {
 
   public emitPlayerHit(payload: PlayerHitPayload): void {
     this.socket?.emit("player:hit", payload);
+  }
+
+  /**
+   * Requests a new match from the game-service.
+   *
+   * Restart is part of the real-time gameplay lifecycle, so the button in
+   * EndScene emits `game:restart` through this game-service socket instead of
+   * the score-service connection that only reports final scoring.
+   */
+  public emitGameRestart(): void {
+    this.socket?.emit("game:restart");
   }
 
   public onPlayerMoved(
@@ -314,16 +344,40 @@ export class SocketManager {
     const meta = import.meta as ImportMeta & {
       env?: {
         VITE_SOCKET_URL?: string;
-        DEV?: boolean;
       };
     };
+    const fallbackHost =
+      typeof window === "undefined" ? "localhost" : window.location.hostname;
 
-    return (
-      meta.env?.VITE_SOCKET_URL?.trim() ||
-      (meta.env?.DEV
-        ? "http://localhost:3001"
-        : "https://underwater-game-server.onrender.com")
-    );
+    return meta.env?.VITE_SOCKET_URL?.trim() || `http://${fallbackHost}:3001`;
+  }
+
+  /**
+   * Stable per-tab id sent to the game-service so duplicate sockets created by
+   * frontend lifecycle/reload timing are not counted as separate real players.
+   * A second browser tab gets its own sessionStorage and still counts as the
+   * second player.
+   */
+  private getClientInstanceId(): string {
+    try {
+      const currentId = sessionStorage.getItem(
+        SocketManager.clientInstanceStorageKey
+      );
+
+      if (currentId) {
+        return currentId;
+      }
+
+      const nextId =
+        globalThis.crypto?.randomUUID?.() ??
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      sessionStorage.setItem(SocketManager.clientInstanceStorageKey, nextId);
+
+      return nextId;
+    } catch {
+      return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
   }
 
   private bindStateCache(): void {
