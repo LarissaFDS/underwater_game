@@ -43,6 +43,7 @@ const FALLBACK_ANIMALS: AnimalStatePayload[] = [
 const SPAWN_X = 0;
 const SPAWN_Y = 0;
 const OBSTACLE_HIT_COOLDOWN_MS = 1000;
+const SCORE_RESULT_TIMEOUT_MS = 12000;
 
 /**
  * Main gameplay scene.
@@ -73,6 +74,9 @@ export class GameScene extends Phaser.Scene {
   private lastMoveEmissionTime = 0;
   private unsubscribeSocketEvents: Array<() => void> = [];
   private unsubscribeScoreResult?: () => void;
+  private scoreResultTimeout?: Phaser.Time.TimerEvent;
+  private scoreStatusOverlay?: Phaser.GameObjects.Container;
+  private finalGameOverPayload?: GameOverPayload;
   private isPuzzleActive = false;
   private pendingPuzzleAnimalId?: string;
   private pendingPuzzleTimeout?: Phaser.Time.TimerEvent;
@@ -116,7 +120,10 @@ export class GameScene extends Phaser.Scene {
     this.isPuzzleActive = false;
     this.isGameOver = false;
     this.hasOpenedEndScene = false;
+    this.finalGameOverPayload = undefined;
     this.lastObstacleHitTime = -OBSTACLE_HIT_COOLDOWN_MS;
+    this.clearScoreResultTimeout();
+    this.destroyScoreStatusOverlay();
     this.clearPendingPuzzle();
   }
 
@@ -235,6 +242,8 @@ export class GameScene extends Phaser.Scene {
       this.removeActivityListeners();
       this.game.events.off("animal:discovered", this.handleAnimalDiscovered);
       this.clearPendingPuzzle();
+      this.clearScoreResultTimeout();
+      this.destroyScoreStatusOverlay();
       this.removeAllSocketEventListeners();
     });
   }
@@ -625,15 +634,21 @@ export class GameScene extends Phaser.Scene {
    * over. Final score and winner presentation wait for `game:result`, because
    * score-service is the source of truth for match scoring.
    */
-  private handleGameOver(_payload: GameOverPayload): void {
+  private handleGameOver(payload: GameOverPayload): void {
     if (this.isGameOver) {
       return;
     }
 
     this.isGameOver = true;
+    this.finalGameOverPayload = payload;
     this.closePuzzleForFinalGameOver();
     this.removeGameplaySocketEventListeners();
-    this.pauseGameSceneIfActive();
+    this.showScoreStatusOverlay(
+      "Calculando pontuação...",
+      "Aguardando resultado do score-service."
+    );
+    this.startScoreResultTimeout();
+    scoreSocketManager.requestLatestResult();
   }
 
   /**
@@ -650,9 +665,79 @@ export class GameScene extends Phaser.Scene {
     this.hasOpenedEndScene = true;
     this.isGameOver = true;
     this.closePuzzleForFinalGameOver();
+    this.clearScoreResultTimeout();
+    this.destroyScoreStatusOverlay();
     this.removeAllSocketEventListeners();
     this.scene.launch("EndScene", payload);
     this.pauseGameSceneIfActive();
+  }
+
+  private startScoreResultTimeout(): void {
+    this.clearScoreResultTimeout();
+    this.scoreResultTimeout = this.time.delayedCall(
+      SCORE_RESULT_TIMEOUT_MS,
+      () => this.openScoreUnavailableEndScene()
+    );
+  }
+
+  private clearScoreResultTimeout(): void {
+    this.scoreResultTimeout?.remove(false);
+    this.scoreResultTimeout = undefined;
+  }
+
+  private openScoreUnavailableEndScene(): void {
+    if (this.hasOpenedEndScene) {
+      return;
+    }
+
+    console.warn(
+      "[GameScene] score-service timeout: opening EndScene with fallback message"
+    );
+
+    this.handleGameResult({
+      ...this.finalGameOverPayload,
+      scoreServiceUnavailable: true,
+      message:
+        "Pontuação indisponível no momento. O resultado do score-service não chegou.",
+      animalScores: [],
+      playerSummaries: [],
+    });
+  }
+
+  private showScoreStatusOverlay(title: string, message: string): void {
+    this.destroyScoreStatusOverlay();
+
+    const { width, height } = this.scale;
+    const overlay = this.add.container(width / 2, height / 2);
+    overlay.setScrollFactor(0);
+    overlay.setDepth(1300);
+
+    const panel = this.add
+      .rectangle(0, 0, 540, 160, 0x020617, 0.9)
+      .setStrokeStyle(2, 0x38bdf8, 0.86);
+    const titleText = this.add
+      .text(0, -28, title, {
+        fontSize: "28px",
+        color: "#f8fafc",
+        align: "center",
+      })
+      .setOrigin(0.5);
+    const messageText = this.add
+      .text(0, 32, message, {
+        fontSize: "18px",
+        color: "#bae6fd",
+        align: "center",
+        wordWrap: { width: 460 },
+      })
+      .setOrigin(0.5);
+
+    overlay.add([panel, titleText, messageText]);
+    this.scoreStatusOverlay = overlay;
+  }
+
+  private destroyScoreStatusOverlay(): void {
+    this.scoreStatusOverlay?.destroy(true);
+    this.scoreStatusOverlay = undefined;
   }
 
   private pauseGameSceneIfActive(): void {

@@ -18,6 +18,8 @@ Configure o CORS dos dois servicos para aceitar o frontend publico:
 
 ```text
 CORS_ORIGIN=https://<frontend>.onrender.com
+# ou
+CLIENT_URL=https://<frontend>.onrender.com
 ```
 
 O `score-service` tambem precisa se conectar ao `game-service` pelo `GAME_SERVICE_URL`:

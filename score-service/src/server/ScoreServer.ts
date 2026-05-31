@@ -82,6 +82,7 @@ export class ScoreServer {
       'https://underwater-game.onrender.com',
     ];
     const rawOrigins =
+      process.env.CLIENT_URL ||
       process.env.CORS_ORIGIN ||
       process.env.CORS_ORIGINS ||
       process.env.FRONTEND_ORIGIN;

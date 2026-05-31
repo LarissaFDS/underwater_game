@@ -383,6 +383,13 @@ export class EndScene extends Phaser.Scene {
   }
 
   private getReasonText(): string {
+    if (this.isScoreServiceUnavailable()) {
+      return (
+        this.readStringField("message", "statusMessage") ??
+        "Pontuação indisponível no momento."
+      );
+    }
+
     if (this.result.reason === "exploration") {
       return "Todos os animais foram descobertos";
     }
@@ -392,6 +399,10 @@ export class EndScene extends Phaser.Scene {
     }
 
     return this.readStringField("reason") ?? "Resultado final recebido";
+  }
+
+  private isScoreServiceUnavailable(): boolean {
+    return this.result.scoreServiceUnavailable === true;
   }
 
   private getEliminationDetail(): string | undefined {

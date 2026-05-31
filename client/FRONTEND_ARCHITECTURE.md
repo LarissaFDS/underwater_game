@@ -49,7 +49,7 @@ Na `GameScene`, o jogador local move o submarino com base no ponteiro. A posiç�
 
 Quando o jogador local se aproxima de um animal, a cena emite `animal:approach`. O backend decide se deve iniciar o minigame e, quando aplicável, envia `puzzle:start`. A `PuzzleScene` abre, envia letras por `puzzle:guess` e solicita dicas por `puzzle:hint`.
 
-O backend valida acertos, erros, penalidades e progresso. O evento `state:update` mantém HUDs e estado visual sincronizados. Quando um jogador perde O2/vidas, `player:gameover` trata o respawn; quando a partida termina, `game:over` congela o fluxo definitivo e a `GameScene` aguarda o `game:result` do `score-service` para abrir a `EndScene`.
+O backend valida acertos, erros, penalidades e progresso. O evento `state:update` mantém HUDs e estado visual sincronizados. Quando um jogador perde O2/vidas, `player:gameover` trata o respawn; quando a partida termina, `game:over` congela o fluxo definitivo e a `GameScene` mostra "Calculando pontuação..." enquanto aguarda o `game:result` do `score-service` para abrir a `EndScene`.
 
 Na `EndScene`, o botão "Jogar novamente" emite `game:restart` pelo `SocketManager`, pois reiniciar a sala é responsabilidade do `game-service`. Quando o `game-service` responde com novo `game:start`, a cena final fecha e a `GameScene` é recriada com a nova seed.
 
@@ -67,7 +67,7 @@ O `score-service` é o microsserviço responsável pela pontuação final da par
 
 A `EndScene` apenas apresenta o payload recebido. Ela não recalcula vencedor, bônus, penalidades ou totais; isso garante que os dois clientes mostrem a mesma pontuação enviada pelo backend. Campos ausentes no payload devem receber fallback visual seguro para não quebrar a tela.
 
-Em produção, a `EndScene` depende do `game:result` vindo do Socket.IO público do `score-service`. O serviço precisa expor o path padrão `/socket.io` na URL pública configurada em `VITE_SCORE_URL`, com CORS permitindo a origem do frontend.
+Em produção, a `EndScene` depende do `game:result` vindo do Socket.IO público do `score-service`. O serviço precisa expor o path padrão `/socket.io` na URL pública configurada em `VITE_SCORE_URL`, com CORS permitindo a origem do frontend. Se o `score-service` demorar ou estiver indisponível, o frontend abre uma tela final com mensagem controlada e sem recalcular pontuação localmente.
 
 ## 7. Relação com microserviços
 

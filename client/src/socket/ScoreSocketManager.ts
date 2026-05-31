@@ -56,6 +56,7 @@ interface ScoreClientToServerEvents {
 export class ScoreSocketManager {
   private static instance: ScoreSocketManager;
   private socket?: Socket<ScoreServerToClientEvents, ScoreClientToServerEvents>;
+  private hasLoggedReconnectFailure = false;
 
   private constructor() {}
 
@@ -75,14 +76,33 @@ export class ScoreSocketManager {
 
     if (!this.socket) {
       console.log(`[ScoreSocketManager] connecting to score-service = ${url}`);
-      this.socket = io(url);
+      this.socket = io(url, {
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 3000,
+        reconnectionDelayMax: 10000,
+        timeout: 10000,
+        transports: ["websocket", "polling"],
+      });
       this.socket.on("connect", () => {
+        this.hasLoggedReconnectFailure = false;
         console.log(
           `[ScoreSocketManager] connected to score-service: ${this.socket?.id}`
         );
+        this.requestLatestResult();
       });
       this.socket.on("connect_error", (error) => {
         console.error("[ScoreSocketManager] connect_error:", error.message);
+      });
+      this.socket.io.on("reconnect_failed", () => {
+        if (this.hasLoggedReconnectFailure) {
+          return;
+        }
+
+        this.hasLoggedReconnectFailure = true;
+        console.error(
+          "[ScoreSocketManager] reconnect_failed: score-service unavailable after retry limit"
+        );
       });
     } else if (!this.socket.connected) {
       console.log(`[ScoreSocketManager] reconnecting to score-service = ${url}`);
@@ -90,6 +110,14 @@ export class ScoreSocketManager {
     }
 
     return this.socket;
+  }
+
+  public requestLatestResult(): void {
+    const socket = this.connect();
+
+    if (socket.connected) {
+      socket.emit("score:getLatest");
+    }
   }
 
   /**
