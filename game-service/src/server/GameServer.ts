@@ -14,6 +14,8 @@ export class GameServer {
   private readonly serviceRoomName: string;
   private readonly playerSocketsByClientInstanceId = new Map<string, string>();
   private readonly puzzleApiUrl: string;
+  private readonly corsOrigin: string | string[];
+  private readonly instanceId: string;
 
   constructor() {
     this.app = express();
@@ -22,9 +24,15 @@ export class GameServer {
     this.roomName = 'ocean_room';
     this.serviceRoomName = 'internal_services';
     this.puzzleApiUrl = process.env.PUZZLE_API_URL || 'http://localhost:3002';
+    this.corsOrigin = this.resolveCorsOrigin();
+    this.instanceId =
+      process.env.RENDER_INSTANCE_ID ||
+      process.env.RENDER_SERVICE_ID ||
+      `pid-${process.pid}`;
 
     this.io = new Server(this.server, {
-      cors: { origin: '*', methods: ['GET', 'POST'] },
+      cors: { origin: this.corsOrigin, methods: ['GET', 'POST'] },
+      transports: ['websocket', 'polling'],
     });
 
     this.setupMiddlewares();
@@ -34,7 +42,7 @@ export class GameServer {
 
   //HTTP
   private setupMiddlewares(): void {
-    this.app.use(cors());
+    this.app.use(cors({ origin: this.corsOrigin }));
     this.app.use(express.json());
   }
 
@@ -42,6 +50,38 @@ export class GameServer {
     this.app.get('/', (_req: Request, res: Response) => {
       res.status(200).json({ status: 'ok', service: 'ocean-game-service' });
     });
+  }
+
+  private resolveCorsOrigin(): string | string[] {
+    const rawOrigins =
+      process.env.CORS_ORIGIN ||
+      process.env.CORS_ORIGINS ||
+      process.env.FRONTEND_ORIGIN;
+
+    if (!rawOrigins) {
+      return '*';
+    }
+
+    const origins = rawOrigins
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+
+    return origins.length === 1 ? origins[0] : origins;
+  }
+
+  private formatCorsOrigin(): string {
+    return Array.isArray(this.corsOrigin)
+      ? this.corsOrigin.join(', ')
+      : this.corsOrigin;
+  }
+
+  private formatHeader(value: string | string[] | undefined): string {
+    if (Array.isArray(value)) {
+      return value.join(', ');
+    }
+
+    return value ?? 'n/a';
   }
 
   //Catalog
@@ -124,23 +164,31 @@ export class GameServer {
   //Socket handlers
   private setupSocketHandlers(): void {
     this.io.on('connection', (socket: Socket) => {
-      console.log('Socket conectado:', socket.id);
-      console.log('Auth recebida:', socket.handshake.auth);
-      console.log('Players antes:', this.room.getPlayerIds());
-      console.log('Player count antes:', this.room.playerCount);
-
       const { clientType, serviceName, clientInstanceId } = socket.handshake
         .auth as {
         clientType?: string;
         serviceName?: string;
         clientInstanceId?: string;
       };
+      const origin = this.formatHeader(socket.handshake.headers.origin);
+      const playersBefore = this.room.getPlayerIds();
+      const playerCountBefore = this.room.playerCount;
+
+      console.log(
+        `[GameServer] connection instance=${this.instanceId} socket=${socket.id} origin=${origin} auth=${JSON.stringify(socket.handshake.auth)}`
+      );
 
       if (clientType === 'service') {
-        console.log(`Microsserviço conectado: ${serviceName ?? socket.id}`);
+        console.log(
+          `[GameServer] service connected instance=${this.instanceId} socket=${socket.id} serviceName=${serviceName ?? 'unknown'}`
+        );
         socket.join(this.serviceRoomName);
         return;
       }
+
+      console.log(
+        `[GameServer] player connecting instance=${this.instanceId} socket=${socket.id} clientInstanceId=${clientInstanceId ?? 'n/a'} playerCountBefore=${playerCountBefore} playersBefore=${playersBefore.join(',') || 'none'}`
+      );
 
       if (clientInstanceId) {
         socket.data.clientInstanceId = clientInstanceId;
@@ -150,6 +198,9 @@ export class GameServer {
       // Sockets de microsserviços e conexões duplicadas da mesma aba não entram
       // no matchmaking; apenas jogadores reais mantidos em GameRoom contam.
       if (this.room.playerCount >= this.room.maxPlayers) {
+        console.warn(
+          `[GameServer] room:full instance=${this.instanceId} socket=${socket.id} clientInstanceId=${clientInstanceId ?? 'n/a'} playerCount=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
+        );
         socket.emit(SocketEvents.ROOM_FULL, { error: 'A sala já está cheia.' });
         socket.disconnect();
         return;
@@ -160,15 +211,17 @@ export class GameServer {
       if (clientInstanceId) {
         this.playerSocketsByClientInstanceId.set(clientInstanceId, socket.id);
       }
-      console.log('Player adicionado:', socket.id);
-      console.log('Players depois:', this.room.getPlayerIds());
-      console.log('Player count depois:', this.room.playerCount);
+      console.log(
+        `[GameServer] player added instance=${this.instanceId} socket=${socket.id} clientInstanceId=${clientInstanceId ?? 'n/a'} playerCountBefore=${playerCountBefore} playerCountAfter=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
+      );
 
       if (this.room.playerCount === this.room.maxPlayers) {
         this.loadCatalog().then(() => {
           const seed = this.room.generateSeed();
           this.room.initializeAnimals();
-          console.log('Emitindo game:start com players:', this.room.getPlayerIds());
+          console.log(
+            `[GameServer] game:start emitted instance=${this.instanceId} seed=${seed} playerCount=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
+          );
           this.io.to(this.roomName).emit(SocketEvents.GAME_START, {
             seed,
             players: this.room.getPlayerIds(),
@@ -201,7 +254,7 @@ export class GameServer {
     }
 
     console.log(
-      `Substituindo socket duplicado da mesma aba: ${previousSocketId} -> ${nextSocketId}`
+      `[GameServer] replacing duplicate client instance=${this.instanceId} clientInstanceId=${clientInstanceId} previousSocket=${previousSocketId} nextSocket=${nextSocketId}`
     );
 
     this.room.removePlayer(previousSocketId);
@@ -357,11 +410,18 @@ export class GameServer {
     });
 
     socket.on('disconnect', () => {
-      console.log(`Desconectado: ${socket.id}`);
+      const playerCountBefore = this.room.playerCount;
+      console.log(
+        `[GameServer] disconnected instance=${this.instanceId} socket=${socket.id} clientInstanceId=${socket.data.clientInstanceId ?? 'n/a'} playerCountBefore=${playerCountBefore} playersBefore=${this.room.getPlayerIds().join(',') || 'none'}`
+      );
 
       const hadActivePuzzle = this.room.getActivePuzzleAnimalId() !== null;
       this.room.removePlayer(socket.id);
       this.removePlayerSocketMapping(socket);
+
+      console.log(
+        `[GameServer] player removed instance=${this.instanceId} socket=${socket.id} playerCountAfter=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
+      );
 
       if (this.room.playerCount === 0) {
         this.room.clearAnimals();
@@ -387,6 +447,9 @@ export class GameServer {
   public listen(port: number): void {
     this.server.listen(port, '0.0.0.0', () => {
       console.log(`🎮 Game Service (Socket) rodando na porta ${port}`);
+      console.log(
+        `[GameServer] instance=${this.instanceId} corsOrigin=${this.formatCorsOrigin()} transports=websocket,polling`
+      );
     });
   }
 }

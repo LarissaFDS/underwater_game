@@ -2,13 +2,31 @@
 
 ## Backend
 
-O backend Socket.IO ja esta publicado em:
+O `game-service` Socket.IO deve estar publicado em uma URL publica HTTPS:
 
 ```text
-https://underwater-game-server.onrender.com
+https://<game-service>.onrender.com
 ```
 
-Ele continua sendo apenas o servidor multiplayer/API usado pelo jogo.
+O `score-service` Socket.IO tambem precisa estar publicado em uma URL publica HTTPS para que a `EndScene` receba `game:result`:
+
+```text
+https://<score-service>.onrender.com
+```
+
+Configure o CORS dos dois servicos para aceitar o frontend publico:
+
+```text
+CORS_ORIGIN=https://<frontend>.onrender.com
+```
+
+O `score-service` tambem precisa se conectar ao `game-service` pelo `GAME_SERVICE_URL`:
+
+```text
+GAME_SERVICE_URL=https://<game-service>.onrender.com
+```
+
+Como o `game-service` guarda a sala em memoria, mantenha uma unica instancia/replica no Render. Para multiplas instancias, sera necessario usar adapter compartilhado do Socket.IO e estado de matchmaking compartilhado.
 
 ## Frontend
 
@@ -21,30 +39,30 @@ Build Command: npm install && npm run build
 Publish Directory: dist
 ```
 
-Configure a variavel de ambiente:
+Configure as variaveis de ambiente antes do build:
 
 ```text
-VITE_SOCKET_URL=https://underwater-game-server.onrender.com
+VITE_SOCKET_URL=https://<game-service>.onrender.com
+VITE_SCORE_URL=https://<score-service>.onrender.com
 ```
 
-Depois do deploy, a URL publica do Static Site sera a URL do jogo em nuvem.
+Depois do deploy, a URL publica do Static Site sera a URL do jogo em nuvem. Variaveis `VITE_*` sao embutidas pelo Vite no bundle; se mudar `VITE_SOCKET_URL` ou `VITE_SCORE_URL`, faca rebuild/redeploy do frontend.
 
 ## Teste local com backend em nuvem
 
 ```bash
 cd client
 npm install
-npm run build
-VITE_SOCKET_URL=https://underwater-game-server.onrender.com npm run dev
+VITE_SOCKET_URL=https://<game-service>.onrender.com VITE_SCORE_URL=https://<score-service>.onrender.com npm run dev
 ```
 
 ## CORS
 
-O backend atualmente aceita origens abertas para Express e Socket.IO. Isso e suficiente
-para testar o deploy inicial. Depois que a URL publica do frontend existir, o ideal e
-restringir o CORS para:
+Se `CORS_ORIGIN`, `CORS_ORIGINS` ou `FRONTEND_ORIGIN` nao forem definidos, os servicos aceitam origens abertas. Em producao, prefira restringir para:
 
 ```text
 http://localhost:5173
 https://URL-PUBLICA-DO-FRONTEND.onrender.com
 ```
+
+Use lista separada por virgulas quando precisar permitir mais de uma origem.

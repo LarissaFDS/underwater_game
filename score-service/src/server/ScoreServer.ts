@@ -16,14 +16,17 @@ export class ScoreServer {
   private readonly io: IoServer;
   private readonly scoreService: ScoreService;
   private readonly bridge: GameBridge;
+  private readonly corsOrigin: string | string[];
 
   constructor() {
     //Infraestrutura
     this.app = express();
     this.server = http.createServer(this.app);
+    this.corsOrigin = this.resolveCorsOrigin();
 
     this.io = new IoServer(this.server, {
-      cors: { origin: '*', methods: ['GET', 'POST'] },
+      cors: { origin: this.corsOrigin, methods: ['GET', 'POST'] },
+      transports: ['websocket', 'polling'],
     });
 
     //Composição das dependências (IoC manual)
@@ -43,7 +46,7 @@ export class ScoreServer {
   }
 
   private setupMiddlewares(): void {
-    this.app.use(cors());
+    this.app.use(cors({ origin: this.corsOrigin }));
     this.app.use(express.json());
   }
 
@@ -57,9 +60,44 @@ export class ScoreServer {
     });
   }
 
+  private resolveCorsOrigin(): string | string[] {
+    const rawOrigins =
+      process.env.CORS_ORIGIN ||
+      process.env.CORS_ORIGINS ||
+      process.env.FRONTEND_ORIGIN;
+
+    if (!rawOrigins) {
+      return '*';
+    }
+
+    const origins = rawOrigins
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+
+    return origins.length === 1 ? origins[0] : origins;
+  }
+
+  private formatCorsOrigin(): string {
+    return Array.isArray(this.corsOrigin)
+      ? this.corsOrigin.join(', ')
+      : this.corsOrigin;
+  }
+
+  private formatHeader(value: string | string[] | undefined): string {
+    if (Array.isArray(value)) {
+      return value.join(', ');
+    }
+
+    return value ?? 'n/a';
+  }
+
   private setupSocketHandlers(): void {
     this.io.on('connection', (socket) => {
-      console.log(`Cliente conectado ao score-service: ${socket.id}`);
+      const origin = this.formatHeader(socket.handshake.headers.origin);
+      console.log(
+        `[ScoreServer] client connected socket=${socket.id} origin=${origin}`
+      );
 
       //Cliente pode pedir o resultado mais recente ao (re)conectar
       socket.on('score:getLatest', () => {
@@ -68,7 +106,7 @@ export class ScoreServer {
       });
 
       socket.on('disconnect', () => {
-        console.log(`Cliente desconectado do score-service: ${socket.id}`);
+        console.log(`[ScoreServer] client disconnected socket=${socket.id}`);
       });
     });
   }
@@ -78,6 +116,9 @@ export class ScoreServer {
 
     this.server.listen(port, '0.0.0.0', () => {
       console.log(`Score Service rodando na porta ${port}`);
+      console.log(
+        `[ScoreServer] corsOrigin=${this.formatCorsOrigin()} transports=websocket,polling`
+      );
     });
   }
 }

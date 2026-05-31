@@ -79,7 +79,22 @@ Os microserviços internos do backend podem mudar sem afetar diretamente a maior
 
 Se a arquitetura backend mudar, normalmente o frontend só precisa ajustar URL, porta, nomes de eventos ou payloads no `SocketManager`, no `ScoreSocketManager` e nos pontos que consomem esses tipos.
 
-## 8. Observações para manutenção
+## 8. Deploy
+
+Em produção, o navegador do usuário só consegue acessar URLs públicas. Por isso, `VITE_SOCKET_URL` deve apontar para a URL pública HTTPS do `game-service` no Render, e `VITE_SCORE_URL` deve apontar para a URL pública HTTPS do `score-service` no Render.
+
+Exemplo:
+
+```text
+VITE_SOCKET_URL=https://<game-service>.onrender.com
+VITE_SCORE_URL=https://<score-service>.onrender.com
+```
+
+Os fallbacks locais (`http://localhost:3001` e `http://localhost:3003`, ou o hostname local equivalente) servem apenas para desenvolvimento local/Docker. Em um frontend HTTPS deployado, essas variáveis precisam existir antes do build, porque o Vite embute variáveis `VITE_*` no bundle. Ao alterar `VITE_SOCKET_URL` ou `VITE_SCORE_URL` no Render, faça rebuild/redeploy do frontend.
+
+O `game-service` mantém o estado da sala em memória. No Render, o serviço deve rodar com uma única instância para que os dois jogadores caiam no mesmo processo. Para múltiplas instâncias, será necessário adicionar um adapter compartilhado do Socket.IO e mover o estado de matchmaking para armazenamento compartilhado.
+
+## 9. Observações para manutenção
 
 - Manter nomes de eventos sincronizados com o backend.
 - Evitar duplicar regra de negócio no frontend.

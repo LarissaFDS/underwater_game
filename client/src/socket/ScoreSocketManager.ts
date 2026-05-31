@@ -74,16 +74,18 @@ export class ScoreSocketManager {
     const url = this.getScoreServerUrl();
 
     if (!this.socket) {
-      console.log("[ScoreSocketManager] connecting to score-service", url);
+      console.log(`[ScoreSocketManager] connecting to score-service: ${url}`);
       this.socket = io(url);
       this.socket.on("connect", () => {
         console.log(
-          "[ScoreSocketManager] connected to score-service",
-          this.socket?.id,
-          url
+          `[ScoreSocketManager] connected to score-service: ${this.socket?.id}`
         );
       });
+      this.socket.on("connect_error", (error) => {
+        console.error("[ScoreSocketManager] connect_error:", error.message);
+      });
     } else if (!this.socket.connected) {
+      console.log(`[ScoreSocketManager] reconnecting to score-service: ${url}`);
       this.socket.connect();
     }
 
@@ -107,10 +109,41 @@ export class ScoreSocketManager {
         VITE_SCORE_URL?: string;
       };
     };
+    const configuredUrl = meta.env?.VITE_SCORE_URL?.trim();
+
+    if (configuredUrl) {
+      return configuredUrl;
+    }
+
+    return this.getLocalFallbackUrl("VITE_SCORE_URL", "score-service", 3003);
+  }
+
+  private getLocalFallbackUrl(
+    envName: string,
+    serviceName: string,
+    port: number
+  ): string {
     const fallbackHost =
       typeof window === "undefined" ? "localhost" : window.location.hostname;
+    const pageProtocol =
+      typeof window === "undefined" ? "http:" : window.location.protocol;
+    const isLocalHost = [
+      "localhost",
+      "127.0.0.1",
+      "0.0.0.0",
+      "::1",
+      "[::1]",
+    ].includes(fallbackHost);
 
-    return meta.env?.VITE_SCORE_URL?.trim() || `http://${fallbackHost}:3003`;
+    if (pageProtocol === "https:" && !isLocalHost) {
+      const message =
+        `[ScoreSocketManager] ${envName} is required for deployed HTTPS frontends. ` +
+        `Set it to the public HTTPS URL of the ${serviceName}.`;
+      console.error(message);
+      throw new Error(message);
+    }
+
+    return `http://${fallbackHost}:${port}`;
   }
 }
 

@@ -195,22 +195,26 @@ export class SocketManager {
     const url = this.getServerUrl();
 
     if (!this.socket) {
-      console.log("[SocketManager] connecting to game-service", url);
+      const auth = {
+        clientType: "player",
+        clientInstanceId: this.getClientInstanceId(),
+      };
+
+      console.log(`[SocketManager] connecting to game-service: ${url}`);
       this.socket = io(url, {
-        auth: {
-          clientType: "player",
-          clientInstanceId: this.getClientInstanceId(),
-        },
+        auth,
       });
       this.socket.on("connect", () => {
         console.log(
-          "[SocketManager] connected to game-service",
-          this.socket?.id,
-          url
+          `[SocketManager] connected to game-service: ${this.socket?.id}`
         );
+      });
+      this.socket.on("connect_error", (error) => {
+        console.error("[SocketManager] connect_error:", error.message);
       });
       this.bindStateCache();
     } else if (!this.socket.connected) {
+      console.log(`[SocketManager] reconnecting to game-service: ${url}`);
       this.socket.connect();
       this.bindStateCache();
     }
@@ -346,10 +350,41 @@ export class SocketManager {
         VITE_SOCKET_URL?: string;
       };
     };
+    const configuredUrl = meta.env?.VITE_SOCKET_URL?.trim();
+
+    if (configuredUrl) {
+      return configuredUrl;
+    }
+
+    return this.getLocalFallbackUrl("VITE_SOCKET_URL", "game-service", 3001);
+  }
+
+  private getLocalFallbackUrl(
+    envName: string,
+    serviceName: string,
+    port: number
+  ): string {
     const fallbackHost =
       typeof window === "undefined" ? "localhost" : window.location.hostname;
+    const pageProtocol =
+      typeof window === "undefined" ? "http:" : window.location.protocol;
+    const isLocalHost = [
+      "localhost",
+      "127.0.0.1",
+      "0.0.0.0",
+      "::1",
+      "[::1]",
+    ].includes(fallbackHost);
 
-    return meta.env?.VITE_SOCKET_URL?.trim() || `http://${fallbackHost}:3001`;
+    if (pageProtocol === "https:" && !isLocalHost) {
+      const message =
+        `[SocketManager] ${envName} is required for deployed HTTPS frontends. ` +
+        `Set it to the public HTTPS URL of the ${serviceName}.`;
+      console.error(message);
+      throw new Error(message);
+    }
+
+    return `http://${fallbackHost}:${port}`;
   }
 
   /**
