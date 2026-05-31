@@ -74,7 +74,7 @@ export class ScoreSocketManager {
     const url = this.getScoreServerUrl();
 
     if (!this.socket) {
-      console.log(`[ScoreSocketManager] connecting to score-service: ${url}`);
+      console.log(`[ScoreSocketManager] connecting to score-service = ${url}`);
       this.socket = io(url);
       this.socket.on("connect", () => {
         console.log(
@@ -85,7 +85,7 @@ export class ScoreSocketManager {
         console.error("[ScoreSocketManager] connect_error:", error.message);
       });
     } else if (!this.socket.connected) {
-      console.log(`[ScoreSocketManager] reconnecting to score-service: ${url}`);
+      console.log(`[ScoreSocketManager] reconnecting to score-service = ${url}`);
       this.socket.connect();
     }
 
@@ -104,12 +104,12 @@ export class ScoreSocketManager {
   }
 
   private getScoreServerUrl(): string {
-    const meta = import.meta as ImportMeta & {
-      env?: {
-        VITE_SCORE_URL?: string;
-      };
-    };
-    const configuredUrl = meta.env?.VITE_SCORE_URL?.trim();
+    const configuredUrl = import.meta.env.VITE_SCORE_URL?.trim();
+
+    console.log(
+      "[ScoreSocketManager] VITE_SCORE_URL =",
+      configuredUrl || "(not set)"
+    );
 
     if (configuredUrl) {
       return configuredUrl;

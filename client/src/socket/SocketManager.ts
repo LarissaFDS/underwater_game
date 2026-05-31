@@ -200,7 +200,7 @@ export class SocketManager {
         clientInstanceId: this.getClientInstanceId(),
       };
 
-      console.log(`[SocketManager] connecting to game-service: ${url}`);
+      console.log(`[SocketManager] connecting to game-service = ${url}`);
       this.socket = io(url, {
         auth,
       });
@@ -214,7 +214,7 @@ export class SocketManager {
       });
       this.bindStateCache();
     } else if (!this.socket.connected) {
-      console.log(`[SocketManager] reconnecting to game-service: ${url}`);
+      console.log(`[SocketManager] reconnecting to game-service = ${url}`);
       this.socket.connect();
       this.bindStateCache();
     }
@@ -345,12 +345,9 @@ export class SocketManager {
   }
 
   private getServerUrl(): string {
-    const meta = import.meta as ImportMeta & {
-      env?: {
-        VITE_SOCKET_URL?: string;
-      };
-    };
-    const configuredUrl = meta.env?.VITE_SOCKET_URL?.trim();
+    const configuredUrl = import.meta.env.VITE_SOCKET_URL?.trim();
+
+    console.log("[SocketManager] VITE_SOCKET_URL =", configuredUrl || "(not set)");
 
     if (configuredUrl) {
       return configuredUrl;

@@ -92,6 +92,8 @@ VITE_SCORE_URL=https://<score-service>.onrender.com
 
 Os fallbacks locais (`http://localhost:3001` e `http://localhost:3003`, ou o hostname local equivalente) servem apenas para desenvolvimento local/Docker. Em um frontend HTTPS deployado, essas variáveis precisam existir antes do build, porque o Vite embute variáveis `VITE_*` no bundle. Ao alterar `VITE_SOCKET_URL` ou `VITE_SCORE_URL` no Render, faça rebuild/redeploy do frontend.
 
+No código Vite, essas variáveis devem ser lidas com acesso direto: `import.meta.env.VITE_SOCKET_URL` e `import.meta.env.VITE_SCORE_URL`. Evite casts genéricos, `process.env` ou acesso dinâmico por string, porque isso pode impedir a substituição correta durante o build.
+
 O `game-service` mantém o estado da sala em memória. No Render, o serviço deve rodar com uma única instância para que os dois jogadores caiam no mesmo processo. Para múltiplas instâncias, será necessário adicionar um adapter compartilhado do Socket.IO e mover o estado de matchmaking para armazenamento compartilhado.
 
 ## 9. Observações para manutenção
