@@ -3,10 +3,10 @@ import { Server as IoServer } from 'socket.io';
 import { ScoreService } from '../services/ScoreService';
 import { GameOverPayload } from '../dtos/ScoreDTO';
 
-
-// Consome game:over do game-service e publica game:result calculado para os clientes do score-service.
 export class GameBridge {
   private client: ClientSocket | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
 
   constructor(
     private readonly io: IoServer,
@@ -15,10 +15,21 @@ export class GameBridge {
   ) {}
 
   connect(): void {
+    if (this.destroyed) return;
+
     this.client = ioClient(this.gameServiceUrl, {
       reconnection: true,
+      reconnectionAttempts: Infinity,   // nunca desiste no Render
       reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+      randomizationFactor: 0.3,
+      // Força polling primeiro — mais estável atrás de proxy reverso Render
+      // O upgrade para websocket acontece automaticamente se disponível
       transports: ['polling', 'websocket'],
+      upgrade: true,
+      // Keepalive: evita que a conexão seja morta por idle no Render (30s timeout)
+      pingInterval: 10000,
+      pingTimeout: 25000,
       auth: {
         clientType: 'service',
         serviceName: 'score-service',
@@ -27,71 +38,81 @@ export class GameBridge {
 
     this.client.on('connect', () => {
       console.log(
-        `GameBridge conectado ao game-service em ${this.gameServiceUrl}`
+        `[GameBridge] conectado ao game-service em ${this.gameServiceUrl} transport=${this.client?.io.engine.transport.name}`
       );
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
     });
 
-    this.client.on('disconnect', () => {
-      console.warn('GameBridge desconectado do game-service.');
+    this.client.on('disconnect', (reason) => {
+      console.warn(`[GameBridge] desconectado do game-service. reason=${reason}`);
+      // socket.io já reconecta automaticamente (reconnectionAttempts: Infinity)
+      // mas logamos para visibilidade no Render
     });
 
     this.client.on('connect_error', (err: Error) => {
-      console.error('GameBridge erro de conexão:', err.message);
+      console.error(`[GameBridge] connect_error: ${err.message}`);
+    });
+
+    this.client.io.on('reconnect', (attempt: number) => {
+      console.log(`[GameBridge] reconectado após ${attempt} tentativa(s)`);
+    });
+
+    this.client.io.on('reconnect_failed', () => {
+      // reconnectionAttempts: Infinity — nunca chega aqui, mas defensivamente:
+      console.error('[GameBridge] reconnect_failed — agendando retry manual');
+      this.scheduleManualReconnect();
     });
 
     this.registerGameEvents();
   }
 
+  private scheduleManualReconnect(): void {
+    if (this.destroyed || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      console.log('[GameBridge] tentando reconexão manual...');
+      this.client?.connect();
+    }, 15000);
+  }
+
   private registerGameEvents(): void {
     if (!this.client) return;
 
-    //game-service emite 'game:over' com GameOverPayload
     this.client.on('game:over', (payload: GameOverPayload) => {
-      const summary = this.summarizeGameOverPayload(payload);
-      console.log('[ScoreService] game:over received', summary);
+      console.log(
+        `[GameBridge] game:over recebido reason=${payload.reason} winner=${payload.winner ?? 'n/a'} players=${Object.keys(payload.players ?? {}).join(',') || 'none'} discoveredAnimals=${payload.discoveredAnimals?.length ?? 0}`
+      );
+
+      // Valida payload mínimo antes de processar
+      if (!payload.reason) {
+        console.error('[GameBridge] game:over ignorado: payload sem reason', payload);
+        return;
+      }
 
       try {
         const result = this.scoreService.processGameOver(payload);
-
-        //Propaga para todos os clientes conectados ao score-service
         this.io.emit('game:result', result);
         console.log(
-          `[ScoreService] game:result emitted reason=${result.reason} winner=${result.winner ?? 'n/a'} animalScores=${result.animalScores.length} playerSummaries=${result.playerSummaries.length}`
+          `[GameBridge] game:result emitido reason=${result.reason} winner=${result.winner ?? 'n/a'} animalScores=${result.animalScores.length} playerSummaries=${result.playerSummaries.length}`
         );
       } catch (err) {
-        console.error('Erro ao processar game:over:', err);
+        console.error('[GameBridge] erro ao processar game:over:', err);
       }
     });
 
-    //Escuta restart para confirmar o reset do estado local se necessário
     this.client.on('game:start', () => {
-      console.log('Nova partida iniciada no game-service.');
-      //Aqui poderíamos resetar caches futuros se necessário
+      console.log('[GameBridge] game:start recebido — nova partida iniciada.');
     });
   }
 
   disconnect(): void {
+    this.destroyed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
     this.client?.disconnect();
-  }
-
-  private summarizeGameOverPayload(payload: GameOverPayload): {
-    reason: GameOverPayload['reason'] | undefined;
-    winner: string | null | undefined;
-    playersCount: number;
-    discoveredAnimalsCount: number;
-  } {
-    const players = payload?.players;
-    const playersCount = Array.isArray(players)
-      ? players.length
-      : Object.keys(players ?? {}).length;
-
-    return {
-      reason: payload?.reason,
-      winner: payload?.winner,
-      playersCount,
-      discoveredAnimalsCount: Array.isArray(payload?.discoveredAnimals)
-        ? payload.discoveredAnimals.length
-        : 0,
-    };
   }
 }
