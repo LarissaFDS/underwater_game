@@ -103,6 +103,10 @@ export class GameServer {
     eliminationReason?: 'oxygen' | 'hearts',
     eliminatedPlayerId?: string
   ): void {
+    if (!reason) {
+      throw new Error('emitGameOver requires a reason');
+    }
+
     const discoveredAnimals = this.room.getDiscoveredAnimalsPayload();
 
     const payload = {
@@ -113,6 +117,9 @@ export class GameServer {
       players: this.room.getPlayers(),
       discoveredAnimals,
     };
+
+    // game:over is the contract consumed by score-service to calculate game:result.
+    console.log('[GameServer] game:over emitted', payload);
 
     this.io
       .to(this.roomName)

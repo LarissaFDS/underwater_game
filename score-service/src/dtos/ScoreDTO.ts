@@ -4,7 +4,7 @@ export interface GameOverPayload {
     reason: 'elimination' | 'exploration';
     eliminationReason?: 'oxygen' | 'hearts';
     eliminatedPlayerId?: string;
-    players: Record<string, RawPlayerState>;
+    players: Record<string, RawPlayerState> | RawPlayerState[];
     discoveredAnimals: DiscoveredAnimalRaw[];
   }
   
@@ -19,8 +19,11 @@ export interface GameOverPayload {
     animalId: string;
     discoveredBy: string;       //socket id do jogador que completou
     timeToDiscoverMs: number;   //ms desde puzzle:start até puzzle:end
+    elapsedMs?: number;
+    timeMs?: number;
     wrongGuesses: number;
     pointsBase: number;
+    basePoints?: number;
   }
   
   //Resultado calculado enviado ao cliente via game:result

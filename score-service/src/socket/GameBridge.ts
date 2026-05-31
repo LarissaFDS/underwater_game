@@ -47,9 +47,8 @@ export class GameBridge {
 
     //game-service emite 'game:over' com GameOverPayload
     this.client.on('game:over', (payload: GameOverPayload) => {
-      console.log(
-        `[ScoreService] game:over received reason=${payload.reason} winner=${payload.winner ?? 'n/a'} players=${Object.keys(payload.players ?? {}).join(',') || 'none'} discoveredAnimals=${payload.discoveredAnimals?.length ?? 0}`
-      );
+      const summary = this.summarizeGameOverPayload(payload);
+      console.log('[ScoreService] game:over received', summary);
 
       try {
         const result = this.scoreService.processGameOver(payload);
@@ -73,5 +72,26 @@ export class GameBridge {
 
   disconnect(): void {
     this.client?.disconnect();
+  }
+
+  private summarizeGameOverPayload(payload: GameOverPayload): {
+    reason: GameOverPayload['reason'] | undefined;
+    winner: string | null | undefined;
+    playersCount: number;
+    discoveredAnimalsCount: number;
+  } {
+    const players = payload?.players;
+    const playersCount = Array.isArray(players)
+      ? players.length
+      : Object.keys(players ?? {}).length;
+
+    return {
+      reason: payload?.reason,
+      winner: payload?.winner,
+      playersCount,
+      discoveredAnimalsCount: Array.isArray(payload?.discoveredAnimals)
+        ? payload.discoveredAnimals.length
+        : 0,
+    };
   }
 }
