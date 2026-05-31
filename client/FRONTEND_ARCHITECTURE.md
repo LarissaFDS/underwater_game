@@ -67,6 +67,8 @@ O `score-service` é o microsserviço responsável pela pontuação final da par
 
 A `EndScene` apenas apresenta o payload recebido. Ela não recalcula vencedor, bônus, penalidades ou totais; isso garante que os dois clientes mostrem a mesma pontuação enviada pelo backend. Campos ausentes no payload devem receber fallback visual seguro para não quebrar a tela.
 
+Em produção, a `EndScene` depende do `game:result` vindo do Socket.IO público do `score-service`. O serviço precisa expor o path padrão `/socket.io` na URL pública configurada em `VITE_SCORE_URL`, com CORS permitindo a origem do frontend.
+
 ## 7. Relação com microserviços
 
 O frontend é o serviço de interface do sistema. Atualmente ele usa dois canais Socket.IO: `SocketManager` para o `game-service` (movimento, puzzle, estado, respawn e restart) e `ScoreSocketManager` para o `score-service` (resultado final e pontuação).

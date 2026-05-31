@@ -72,6 +72,7 @@ export class GameScene extends Phaser.Scene {
   private triggeredAnimalIds = new Set<string>();
   private lastMoveEmissionTime = 0;
   private unsubscribeSocketEvents: Array<() => void> = [];
+  private unsubscribeScoreResult?: () => void;
   private isPuzzleActive = false;
   private pendingPuzzleAnimalId?: string;
   private pendingPuzzleTimeout?: Phaser.Time.TimerEvent;
@@ -191,7 +192,11 @@ export class GameScene extends Phaser.Scene {
         );
       }),
       socketManager.onPuzzleStart((payload: PuzzleStartPayload) => {
-        if (this.isPuzzleActive) {
+        if (
+          this.isPuzzleActive ||
+          this.isGameOver ||
+          !this.scene.isActive("GameScene")
+        ) {
           return;
         }
 
@@ -203,7 +208,7 @@ export class GameScene extends Phaser.Scene {
         // PuzzleScene is launched as an overlay and GameScene pauses so local
         // movement does not continue while the player answers the minigame.
         this.scene.launch("PuzzleScene", payload);
-        this.scene.pause("GameScene");
+        this.pauseGameSceneIfActive();
       }),
       socketManager.onStateUpdate((payload: StateUpdatePayload) => {
         this.applyStateUpdate(payload);
@@ -213,10 +218,12 @@ export class GameScene extends Phaser.Scene {
       }),
       socketManager.onGameOver((payload: GameOverPayload) => {
         this.handleGameOver(payload);
-      }),
-      scoreSocketManager.onGameResult((payload: GameResultPayload) => {
-        this.handleGameResult(payload);
       })
+    );
+    this.unsubscribeScoreResult = scoreSocketManager.onGameResult(
+      (payload: GameResultPayload) => {
+        this.handleGameResult(payload);
+      }
     );
 
     if (socketManager.currentState) {
@@ -228,8 +235,7 @@ export class GameScene extends Phaser.Scene {
       this.removeActivityListeners();
       this.game.events.off("animal:discovered", this.handleAnimalDiscovered);
       this.clearPendingPuzzle();
-      this.unsubscribeSocketEvents.forEach((unsubscribe) => unsubscribe());
-      this.unsubscribeSocketEvents = [];
+      this.removeAllSocketEventListeners();
     });
   }
 
@@ -626,7 +632,8 @@ export class GameScene extends Phaser.Scene {
 
     this.isGameOver = true;
     this.closePuzzleForFinalGameOver();
-    this.scene.pause("GameScene");
+    this.removeGameplaySocketEventListeners();
+    this.pauseGameSceneIfActive();
   }
 
   /**
@@ -643,8 +650,26 @@ export class GameScene extends Phaser.Scene {
     this.hasOpenedEndScene = true;
     this.isGameOver = true;
     this.closePuzzleForFinalGameOver();
+    this.removeAllSocketEventListeners();
     this.scene.launch("EndScene", payload);
-    this.scene.pause("GameScene");
+    this.pauseGameSceneIfActive();
+  }
+
+  private pauseGameSceneIfActive(): void {
+    if (this.scene.isActive("GameScene")) {
+      this.scene.pause("GameScene");
+    }
+  }
+
+  private removeGameplaySocketEventListeners(): void {
+    this.unsubscribeSocketEvents.forEach((unsubscribe) => unsubscribe());
+    this.unsubscribeSocketEvents = [];
+  }
+
+  private removeAllSocketEventListeners(): void {
+    this.removeGameplaySocketEventListeners();
+    this.unsubscribeScoreResult?.();
+    this.unsubscribeScoreResult = undefined;
   }
 
   private closePuzzleForFinalGameOver(): void {

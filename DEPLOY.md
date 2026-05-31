@@ -26,6 +26,16 @@ O `score-service` tambem precisa se conectar ao `game-service` pelo `GAME_SERVIC
 GAME_SERVICE_URL=https://<game-service>.onrender.com
 ```
 
+No Render, o servico `underwater-score-service` precisa estar apontando para o pacote do `score-service`:
+
+```text
+Root Directory: score-service
+Build Command: npm install && npm run build
+Start Command: npm start
+```
+
+O comando `npm start` executa `node build/index.js`, que usa `process.env.PORT` e anexa o Socket.IO ao mesmo HTTP server do Express no path publico `/socket.io`.
+
 Como o `game-service` guarda a sala em memoria, mantenha uma unica instancia/replica no Render. Para multiplas instancias, sera necessario usar adapter compartilhado do Socket.IO e estado de matchmaking compartilhado.
 
 ## Frontend

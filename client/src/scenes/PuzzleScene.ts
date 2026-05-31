@@ -137,7 +137,7 @@ export class PuzzleScene extends Phaser.Scene {
       socketManager.onPlayerGameOver((payload) =>
         this.handlePlayerGameOver(payload)
       ),
-      socketManager.onGameOver(() => this.closePuzzle(false))
+      socketManager.onGameOver(() => this.stopForFinalGameOver())
     );
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -932,7 +932,25 @@ export class PuzzleScene extends Phaser.Scene {
       socketManager.emitPuzzleEnd({ animalId: this.animalId });
     }
 
-    this.scene.resume("GameScene");
+    this.resumeGameSceneIfPaused();
     this.scene.stop();
+  }
+
+  private stopForFinalGameOver(): void {
+    if (this.isClosing) {
+      return;
+    }
+
+    this.isClosing = true;
+    this.clearPendingGuessState();
+    this.closeTimer?.remove(false);
+    this.closeTimer = undefined;
+    this.scene.stop();
+  }
+
+  private resumeGameSceneIfPaused(): void {
+    if (this.scene.isPaused("GameScene")) {
+      this.scene.resume("GameScene");
+    }
   }
 }

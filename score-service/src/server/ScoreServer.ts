@@ -1,7 +1,7 @@
 import http from 'http';
 import express, { Application, Request, Response } from 'express';
 import { Server as IoServer } from 'socket.io';
-import cors from 'cors';
+import cors, { type CorsOptions } from 'cors';
 
 import { GameResultRepository } from '../repositories/GameResultRepository';
 import { ScoreCalculator } from '../services/ScoreCalculator';
@@ -16,16 +16,23 @@ export class ScoreServer {
   private readonly io: IoServer;
   private readonly scoreService: ScoreService;
   private readonly bridge: GameBridge;
-  private readonly corsOrigin: string | string[];
+  private readonly allowedOrigins: string[];
+  private readonly corsOptions: CorsOptions;
 
   constructor() {
     //Infraestrutura
     this.app = express();
     this.server = http.createServer(this.app);
-    this.corsOrigin = this.resolveCorsOrigin();
+    this.allowedOrigins = this.resolveAllowedOrigins();
+    this.corsOptions = {
+      origin: this.allowedOrigins,
+      methods: ['GET', 'POST'],
+      credentials: true,
+    };
 
     this.io = new IoServer(this.server, {
-      cors: { origin: this.corsOrigin, methods: ['GET', 'POST'] },
+      path: '/socket.io',
+      cors: this.corsOptions,
       transports: ['websocket', 'polling'],
     });
 
@@ -46,7 +53,7 @@ export class ScoreServer {
   }
 
   private setupMiddlewares(): void {
-    this.app.use(cors({ origin: this.corsOrigin }));
+    this.app.use(cors(this.corsOptions));
     this.app.use(express.json());
   }
 
@@ -58,30 +65,40 @@ export class ScoreServer {
     this.app.get('/', (_req: Request, res: Response) => {
       res.status(200).json({ status: 'ok', service: 'ocean-score-service' });
     });
+
+    this.app.get('/health', (_req: Request, res: Response) => {
+      res.status(200).json({
+        status: 'ok',
+        service: 'ocean-score-service',
+        socketPath: '/socket.io',
+      });
+    });
   }
 
-  private resolveCorsOrigin(): string | string[] {
+  private resolveAllowedOrigins(): string[] {
+    const defaultOrigins = [
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'https://underwater-game.onrender.com',
+    ];
     const rawOrigins =
       process.env.CORS_ORIGIN ||
       process.env.CORS_ORIGINS ||
       process.env.FRONTEND_ORIGIN;
 
     if (!rawOrigins) {
-      return '*';
+      return defaultOrigins;
     }
 
-    const origins = rawOrigins
-      .split(',')
-      .map((origin) => origin.trim())
-      .filter(Boolean);
-
-    return origins.length === 1 ? origins[0] : origins;
-  }
-
-  private formatCorsOrigin(): string {
-    return Array.isArray(this.corsOrigin)
-      ? this.corsOrigin.join(', ')
-      : this.corsOrigin;
+    return Array.from(
+      new Set([
+        ...defaultOrigins,
+        ...rawOrigins
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter(Boolean),
+      ])
+    );
   }
 
   private formatHeader(value: string | string[] | undefined): string {
@@ -93,10 +110,17 @@ export class ScoreServer {
   }
 
   private setupSocketHandlers(): void {
+    this.io.engine.on('connection_error', (error) => {
+      const origin = this.formatHeader(error.req?.headers.origin);
+      console.error(
+        `[ScoreServer] connect_error origin=${origin} code=${error.code} message=${error.message}`
+      );
+    });
+
     this.io.on('connection', (socket) => {
       const origin = this.formatHeader(socket.handshake.headers.origin);
       console.log(
-        `[ScoreServer] client connected socket=${socket.id} origin=${origin}`
+        `[ScoreServer] Frontend connected to score-service socket=${socket.id} origin=${origin}`
       );
 
       //Cliente pode pedir o resultado mais recente ao (re)conectar
@@ -115,10 +139,10 @@ export class ScoreServer {
     this.bridge.connect();
 
     this.server.listen(port, '0.0.0.0', () => {
-      console.log(`Score Service rodando na porta ${port}`);
-      console.log(
-        `[ScoreServer] corsOrigin=${this.formatCorsOrigin()} transports=websocket,polling`
-      );
+      console.log(`Score Service listening on PORT ${port}`);
+      console.log('Socket.IO ready on /socket.io');
+      console.log(`[ScoreServer] allowedOrigins=${this.allowedOrigins.join(', ')}`);
+      console.log('[ScoreServer] transports=websocket,polling');
     });
   }
 }
