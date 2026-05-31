@@ -74,7 +74,7 @@ export class GameScene extends Phaser.Scene {
   private lastMoveEmissionTime = 0;
   private unsubscribeSocketEvents: Array<() => void> = [];
   private unsubscribeScoreResult?: () => void;
-  private scoreResultTimeout?: Phaser.Time.TimerEvent;
+  private scoreResultTimeoutId?: ReturnType<typeof setTimeout>;
   private scoreStatusOverlay?: Phaser.GameObjects.Container;
   private finalGameOverPayload?: GameOverPayload;
   private isPuzzleActive = false;
@@ -648,7 +648,7 @@ export class GameScene extends Phaser.Scene {
       "Aguardando resultado do score-service."
     );
     this.startScoreResultTimeout();
-    scoreSocketManager.requestLatestResult();
+    //sscoreSocketManager.requestLatestResult();
   }
 
   /**
@@ -658,10 +658,16 @@ export class GameScene extends Phaser.Scene {
    * mutate scoring fields, which keeps both clients aligned with score-service.
    */
   private handleGameResult(payload: GameResultPayload): void {
-    if (this.hasOpenedEndScene) {
-      return;
+    if (this.hasOpenedEndScene) return;
+  
+    // ✅ Descarta resultado antigo se o reason não bate com o jogo atual
+    if (!payload.scoreServiceUnavailable && this.finalGameOverPayload?.reason) {
+      if (payload.reason && payload.reason !== this.finalGameOverPayload.reason) {
+        console.warn("[GameScene] game:result com reason diferente — resultado antigo descartado");
+        return;
+      }
     }
-
+  
     this.hasOpenedEndScene = true;
     this.isGameOver = true;
     this.closePuzzleForFinalGameOver();
@@ -674,15 +680,32 @@ export class GameScene extends Phaser.Scene {
 
   private startScoreResultTimeout(): void {
     this.clearScoreResultTimeout();
-    this.scoreResultTimeout = this.time.delayedCall(
-      SCORE_RESULT_TIMEOUT_MS,
-      () => this.openScoreUnavailableEndScene()
-    );
+    let attempts = 0;
+    const maxAttempts = 4; // 4 × 3s = 12s total
+  
+    const tryFetch = () => {
+      attempts++;
+      console.log(`[GameScene] score:getLatest tentativa ${attempts}/${maxAttempts}`);
+      scoreSocketManager.requestLatestResult();
+  
+      if (attempts < maxAttempts) {
+        // ✅ window.setTimeout nunca é pausado pelo Phaser
+        this.scoreResultTimeoutId = window.setTimeout(tryFetch, 3000);
+      } else {
+        this.openScoreUnavailableEndScene();
+      }
+    };
+  
+    // Espera 2s antes da primeira tentativa:
+    // dá tempo do game:result chegar naturalmente pelo WebSocket
+    this.scoreResultTimeoutId = window.setTimeout(tryFetch, 2000);
   }
 
   private clearScoreResultTimeout(): void {
-    this.scoreResultTimeout?.remove(false);
-    this.scoreResultTimeout = undefined;
+    if (this.scoreResultTimeoutId !== undefined) {
+      clearTimeout(this.scoreResultTimeoutId);
+      this.scoreResultTimeoutId = undefined;
+    }
   }
 
   // DEPOIS — tenta HTTP antes de exibir fallback
@@ -774,9 +797,14 @@ export class GameScene extends Phaser.Scene {
     this.clearPendingPuzzle();
     this.isPuzzleActive = false;
     this.animalsInRange.clear();
-
+  
     if (this.scene.isActive("PuzzleScene") || this.scene.isPaused("PuzzleScene")) {
       this.scene.stop("PuzzleScene");
+    }
+  
+    // ✅ Se GameScene estava pausada pela PuzzleScene, retoma para o timer funcionar
+    if (this.scene.isPaused("GameScene")) {
+      this.scene.resume("GameScene");
     }
   }
 
