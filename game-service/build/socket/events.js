@@ -1,0 +1,23 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SocketEvents = void 0;
+var SocketEvents;
+(function (SocketEvents) {
+    SocketEvents["PLAYER_JOIN"] = "player:join";
+    SocketEvents["PLAYER_DISCONNECT"] = "player:disconnect";
+    SocketEvents["PLAYER_MOVE"] = "player:move";
+    SocketEvents["PLAYER_MOVED"] = "player:moved";
+    SocketEvents["GAME_START"] = "game:start";
+    SocketEvents["ROOM_FULL"] = "room:full";
+    SocketEvents["ANIMAL_APPROACH"] = "animal:approach";
+    SocketEvents["PUZZLE_START"] = "puzzle:start";
+    SocketEvents["PUZZLE_END"] = "puzzle:end";
+    SocketEvents["PLAYER_HIT"] = "player:hit";
+    SocketEvents["PUZZLE_GUESS"] = "puzzle:guess";
+    SocketEvents["PUZZLE_HINT"] = "puzzle:hint";
+    SocketEvents["PUZZLE_RESULT"] = "puzzle:result";
+    SocketEvents["PLAYER_GAMEOVER"] = "player:gameover";
+    SocketEvents["GAME_OVER"] = "game:over";
+    SocketEvents["GAME_RESTART"] = "game:restart";
+    SocketEvents["STATE_UPDATE"] = "state:update";
+})(SocketEvents || (exports.SocketEvents = SocketEvents = {}));

@@ -28,8 +28,6 @@ export class GameBridge {
       transports: ['polling', 'websocket'],
       upgrade: true,
       // Keepalive: evita que a conexão seja morta por idle no Render (30s timeout)
-      pingInterval: 10000,
-      pingTimeout: 25000,
       auth: {
         clientType: 'service',
         serviceName: 'score-service',
