@@ -109,14 +109,18 @@ export class ScoreService {
     if (Array.isArray(players)) {
       return Object.fromEntries(
         players
-          .filter((player) => player?.id)
-          .map((player) => [player.id, player])
+          .map((player) => {
+            // Tenta achar o ID seja qual for o nome da propriedade que o game-service usou
+            const id = player?.id || player?.playerId || player?.socketId;
+            return id ? [id, player] : null;
+          })
+          .filter(Boolean) as [string, RawPlayerState][]
       );
     }
 
     return players;
   }
-
+  
   private normalizeDiscoveredAnimals(
     discoveredAnimals: DiscoveredAnimalRaw[] | undefined
   ): DiscoveredAnimalRaw[] {

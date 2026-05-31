@@ -77,6 +77,8 @@ export class GameBridge {
 
   private lastProcessedGameOverId: string | null = null;
 
+  private lastGameOverTime = 0; // Adicione isso como propriedade da classe
+
   private registerGameEvents(): void {
     if (!this.client) return;
   
@@ -86,13 +88,13 @@ export class GameBridge {
         return;
       }
   
-      // ✅ Deduplicate: same winner + reason + player count = same game
-      const payloadId = `${payload.reason}-${payload.winner}-${Object.keys(payload.players ?? {}).join(',')}`;
-      if (payloadId === this.lastProcessedGameOverId) {
-        console.log('[GameBridge] game:over duplicado ignorado');
+      // ✅ NOVA LÓGICA DE DEDUPLICAÇÃO (Por tempo, não por texto)
+      const now = Date.now();
+      if (now - this.lastGameOverTime < 3000) { // Bloqueia repetições num intervalo de 3s
+        console.log('[GameBridge] game:over duplicado ignorado (dentro do cooldown)');
         return;
       }
-      this.lastProcessedGameOverId = payloadId;
+      this.lastGameOverTime = now;
   
       try {
         const result = this.scoreService.processGameOver(payload);
@@ -101,11 +103,6 @@ export class GameBridge {
       } catch (err) {
         console.error('[GameBridge] erro ao processar game:over:', err);
       }
-    });
-  
-    this.client.on('game:start', () => {
-      this.lastProcessedGameOverId = null; // ✅ reset for new game
-      console.log('[GameBridge] game:start — nova partida.');
     });
   }
 

@@ -8,7 +8,8 @@ export class ScoreController {
     const result = this.scoreService.getLatestResult();
 
     if (!result) {
-      res.status(404).json({ error: 'Nenhum resultado encontrado.' });
+      // Retorna 200 com null. O frontend vai ler esse null sem disparar erro no console.
+      res.status(200).json(null);
       return;
     }
 
