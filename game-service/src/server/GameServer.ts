@@ -30,15 +30,20 @@ export class GameServer {
       process.env.RENDER_SERVICE_ID ||
       `pid-${process.pid}`;
 
+    
     this.io = new Server(this.server, {
       cors: { origin: this.corsOrigin, methods: ['GET', 'POST'] },
       transports: ['websocket', 'polling'],
+      pingInterval: 15_000,   // default is 25s — too close to Render's 30s idle limit
+      pingTimeout:  10_000,
     });
-
+    
     this.setupMiddlewares();
     this.setupHttpRoutes();
     this.setupSocketHandlers();
   }
+
+  private lastGameOverPayload: object | null = null;
 
   //HTTP
   private setupMiddlewares(): void {
@@ -99,16 +104,13 @@ export class GameServer {
   //Game Over
   private emitGameOver(
     winnerId: string | null,
-    reason: 'elimination' | 'exploration', //um jogador morreu 2x ou todos os animais foram descobertos
+    reason: 'elimination' | 'exploration',
     eliminationReason?: 'oxygen' | 'hearts',
     eliminatedPlayerId?: string
   ): void {
-    if (!reason) {
-      throw new Error('emitGameOver requires a reason');
-    }
+    if (!reason) throw new Error('emitGameOver requires a reason');
 
     const discoveredAnimals = this.room.getDiscoveredAnimalsPayload();
-
     const payload = {
       winner: winnerId,
       reason,
@@ -118,17 +120,15 @@ export class GameServer {
       discoveredAnimals,
     };
 
-    // game:over is the contract consumed by score-service to calculate game:result.
-    console.log('[GameServer] game:over emitted', payload);
+    // ✅ Cache so reconnecting services can catch up
+    this.lastGameOverPayload = payload;
 
     this.io
       .to(this.roomName)
       .to(this.serviceRoomName)
       .emit(SocketEvents.GAME_OVER, payload);
 
-    console.log(
-      `game:over emitido — reason: ${reason}, winner: ${winnerId}, eliminatedPlayerId: ${eliminatedPlayerId ?? 'n/a'}, eliminationReason: ${eliminationReason ?? 'n/a'}`
-    );
+    console.log('[GameServer] game:over emitted', payload);
   }
 
   private checkPlayerDeath(playerId: string): void {
@@ -188,10 +188,22 @@ export class GameServer {
       );
 
       if (clientType === 'service') {
-        console.log(
-          `[GameServer] service connected instance=${this.instanceId} socket=${socket.id} serviceName=${serviceName ?? 'unknown'}`
-        );
+        console.log(`[GameServer] service connected socket=${socket.id} serviceName=${serviceName ?? 'unknown'}`);
         socket.join(this.serviceRoomName);
+      
+        // ✅ If game:over was already emitted and service missed it, replay immediately
+        if (this.lastGameOverPayload) {
+          socket.emit(SocketEvents.GAME_OVER, this.lastGameOverPayload);
+          console.log('[GameServer] replayed last game:over to reconnected service');
+        }
+      
+        // ✅ Allow service to request a replay at any time
+        socket.on('service:getLastGameOver', () => {
+          if (this.lastGameOverPayload) {
+            socket.emit(SocketEvents.GAME_OVER, this.lastGameOverPayload);
+          }
+        });
+      
         return;
       }
 
@@ -228,17 +240,9 @@ export class GameServer {
         this.loadCatalog().then(() => {
           const seed = this.room.generateSeed();
           this.room.initializeAnimals();
-          console.log(
-            `[GameServer] game:start emitted instance=${this.instanceId} seed=${seed} playerCount=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
-          );
-          this.io.to(this.roomName).emit(SocketEvents.GAME_START, {
-            seed,
-            players: this.room.getPlayerIds(),
-          });
-
-          this.io
-            .to(this.roomName)
-            .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+          this.lastGameOverPayload = null; // ✅ fresh game, clear cache
+          this.io.to(this.roomName).emit(SocketEvents.GAME_START, { seed, players: this.room.getPlayerIds() });
+          this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
         });
       }
 

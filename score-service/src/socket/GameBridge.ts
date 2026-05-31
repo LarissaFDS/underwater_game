@@ -16,32 +16,35 @@ export class GameBridge {
 
   connect(): void {
     if (this.destroyed) return;
-
+  
     this.client = ioClient(this.gameServiceUrl, {
       reconnection: true,
-      reconnectionAttempts: Infinity,   // nunca desiste no Render
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
       randomizationFactor: 0.3,
-      // Força polling primeiro — mais estável atrás de proxy reverso Render
-      // O upgrade para websocket acontece automaticamente se disponível
       transports: ['polling', 'websocket'],
       upgrade: true,
-      // Keepalive: evita que a conexão seja morta por idle no Render (30s timeout)
       auth: {
         clientType: 'service',
         serviceName: 'score-service',
       },
     });
-
+  
     this.client.on('connect', () => {
-      console.log(
-        `[GameBridge] conectado ao game-service em ${this.gameServiceUrl} transport=${this.client?.io.engine.transport.name}`
-      );
+      console.log(`[GameBridge] conectado ao game-service transport=${this.client?.io.engine.transport.name}`);
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       }
+      // ✅ Request cached game:over in case we connected after it was emitted
+      this.client?.emit('service:getLastGameOver');
+    });
+  
+    this.client.io.on('reconnect', (attempt: number) => {
+      console.log(`[GameBridge] reconectado após ${attempt} tentativa(s)`);
+      // ✅ Also request on reconnect
+      this.client?.emit('service:getLastGameOver');
     });
 
     this.client.on('disconnect', (reason) => {
@@ -52,11 +55,7 @@ export class GameBridge {
 
     this.client.on('connect_error', (err: Error) => {
       console.error(`[GameBridge] connect_error: ${err.message}`);
-    });
-
-    this.client.io.on('reconnect', (attempt: number) => {
-      console.log(`[GameBridge] reconectado após ${attempt} tentativa(s)`);
-    });
+    });    
 
     this.client.io.on('reconnect_failed', () => {
       // reconnectionAttempts: Infinity — nunca chega aqui, mas defensivamente:
@@ -76,33 +75,37 @@ export class GameBridge {
     }, 15000);
   }
 
+  private lastProcessedGameOverId: string | null = null;
+
   private registerGameEvents(): void {
     if (!this.client) return;
-
+  
     this.client.on('game:over', (payload: GameOverPayload) => {
-      console.log(
-        `[GameBridge] game:over recebido reason=${payload.reason} winner=${payload.winner ?? 'n/a'} players=${Object.keys(payload.players ?? {}).join(',') || 'none'} discoveredAnimals=${payload.discoveredAnimals?.length ?? 0}`
-      );
-
-      // Valida payload mínimo antes de processar
       if (!payload.reason) {
-        console.error('[GameBridge] game:over ignorado: payload sem reason', payload);
+        console.error('[GameBridge] game:over ignorado: payload sem reason');
         return;
       }
-
+  
+      // ✅ Deduplicate: same winner + reason + player count = same game
+      const payloadId = `${payload.reason}-${payload.winner}-${Object.keys(payload.players ?? {}).join(',')}`;
+      if (payloadId === this.lastProcessedGameOverId) {
+        console.log('[GameBridge] game:over duplicado ignorado');
+        return;
+      }
+      this.lastProcessedGameOverId = payloadId;
+  
       try {
         const result = this.scoreService.processGameOver(payload);
         this.io.emit('game:result', result);
-        console.log(
-          `[GameBridge] game:result emitido reason=${result.reason} winner=${result.winner ?? 'n/a'} animalScores=${result.animalScores.length} playerSummaries=${result.playerSummaries.length}`
-        );
+        console.log(`[GameBridge] game:result emitido reason=${result.reason} winner=${result.winner ?? 'n/a'}`);
       } catch (err) {
         console.error('[GameBridge] erro ao processar game:over:', err);
       }
     });
-
+  
     this.client.on('game:start', () => {
-      console.log('[GameBridge] game:start recebido — nova partida iniciada.');
+      this.lastProcessedGameOverId = null; // ✅ reset for new game
+      console.log('[GameBridge] game:start — nova partida.');
     });
   }
 

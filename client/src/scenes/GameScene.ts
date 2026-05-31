@@ -685,15 +685,28 @@ export class GameScene extends Phaser.Scene {
     this.scoreResultTimeout = undefined;
   }
 
-  private openScoreUnavailableEndScene(): void {
+  // DEPOIS — tenta HTTP antes de exibir fallback
+  private async openScoreUnavailableEndScene(): Promise<void> {
     if (this.hasOpenedEndScene) {
       return;
     }
 
-    console.warn(
-      "[GameScene] score-service timeout: opening EndScene with fallback message"
-    );
+    console.warn("[GameScene] score-service timeout: tentando fallback HTTP...");
 
+    try {
+      const httpResult = await scoreSocketManager.fetchLatestResultHttp();
+
+      if (httpResult && !this.hasOpenedEndScene) {
+        console.log("[GameScene] resultado obtido via HTTP fallback");
+        this.handleGameResult(httpResult);
+        return;
+      }
+    } catch (err) {
+      console.error("[GameScene] HTTP fallback falhou", err);
+    }
+
+    // Só chega aqui se o HTTP também falhou
+    console.warn("[GameScene] abrindo EndScene sem pontuação");
     this.handleGameResult({
       ...this.finalGameOverPayload,
       scoreServiceUnavailable: true,

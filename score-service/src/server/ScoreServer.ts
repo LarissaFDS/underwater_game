@@ -34,6 +34,8 @@ export class ScoreServer {
       path: '/socket.io',
       cors: this.corsOptions,
       transports: ['polling', 'websocket'],
+      pingInterval: 15_000,   // ✅ same as game-service
+      pingTimeout:  10_000,
     });
 
     //Composição das dependências (IoC manual)

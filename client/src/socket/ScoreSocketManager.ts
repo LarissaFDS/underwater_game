@@ -120,6 +120,17 @@ export class ScoreSocketManager {
     }
   }
 
+  public async fetchLatestResultHttp(): Promise<GameResultPayload | null> {
+    try {
+      const url = this.getScoreServerUrl();
+      const res = await fetch(`${url}/api/latest`);
+      if (!res.ok) return null;
+      return await res.json() as GameResultPayload;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Subscribes to final match results calculated by the score-service.
    */
