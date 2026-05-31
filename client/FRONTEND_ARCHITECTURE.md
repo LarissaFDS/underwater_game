@@ -69,6 +69,8 @@ A `EndScene` apenas apresenta o payload recebido. Ela não recalcula vencedor, b
 
 Em produção, a `EndScene` depende do `game:result` vindo do Socket.IO público do `score-service`. O serviço precisa expor o path padrão `/socket.io` na URL pública configurada em `VITE_SCORE_URL`, com CORS permitindo a origem do frontend. Se o `score-service` demorar ou estiver indisponível, o frontend abre uma tela final com mensagem controlada e sem recalcular pontuação localmente.
 
+O `ScoreSocketManager` mantém polling e websocket habilitados para compatibilidade com o Render; polling inicia a conexão e o Socket.IO pode fazer upgrade para websocket quando disponível.
+
 ## 7. Relação com microserviços
 
 O frontend é o serviço de interface do sistema. Atualmente ele usa dois canais Socket.IO: `SocketManager` para o `game-service` (movimento, puzzle, estado, respawn e restart) e `ScoreSocketManager` para o `score-service` (resultado final e pontuação).

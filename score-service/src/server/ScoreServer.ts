@@ -33,7 +33,7 @@ export class ScoreServer {
     this.io = new IoServer(this.server, {
       path: '/socket.io',
       cors: this.corsOptions,
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
     });
 
     //Composição das dependências (IoC manual)
@@ -63,13 +63,13 @@ export class ScoreServer {
     this.app.use('/api', buildRouter(controller));
 
     this.app.get('/', (_req: Request, res: Response) => {
-      res.status(200).json({ status: 'ok', service: 'ocean-score-service' });
+      res.status(200).json({ status: 'ok', service: 'score-service' });
     });
 
     this.app.get('/health', (_req: Request, res: Response) => {
       res.status(200).json({
         status: 'ok',
-        service: 'ocean-score-service',
+        service: 'score-service',
         socketPath: '/socket.io',
       });
     });
@@ -81,11 +81,14 @@ export class ScoreServer {
       'http://127.0.0.1:5173',
       'https://underwater-game.onrender.com',
     ];
-    const rawOrigins =
-      process.env.CLIENT_URL ||
-      process.env.CORS_ORIGIN ||
-      process.env.CORS_ORIGINS ||
-      process.env.FRONTEND_ORIGIN;
+    const rawOrigins = [
+      process.env.CLIENT_URL,
+      process.env.CORS_ORIGIN,
+      process.env.CORS_ORIGINS,
+      process.env.FRONTEND_ORIGIN,
+    ]
+      .filter(Boolean)
+      .join(',');
 
     if (!rawOrigins) {
       return defaultOrigins;
@@ -140,10 +143,10 @@ export class ScoreServer {
     this.bridge.connect();
 
     this.server.listen(port, '0.0.0.0', () => {
-      console.log(`Score Service listening on PORT ${port}`);
+      console.log(`Score Service listening on port ${port}`);
       console.log('Socket.IO ready on /socket.io');
       console.log(`[ScoreServer] allowedOrigins=${this.allowedOrigins.join(', ')}`);
-      console.log('[ScoreServer] transports=websocket,polling');
+      console.log('[ScoreServer] transports=polling,websocket');
     });
   }
 }

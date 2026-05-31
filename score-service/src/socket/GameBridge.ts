@@ -4,7 +4,7 @@ import { ScoreService } from '../services/ScoreService';
 import { GameOverPayload } from '../dtos/ScoreDTO';
 
 
-//GameBridge conecta ao game-service como cliente Socket.io, escuta eventos de jogo (game:over, game:restart) e propaga o resultado calculado para todos os clientes via score-service io
+// Consome game:over do game-service e publica game:result calculado para os clientes do score-service.
 export class GameBridge {
   private client: ClientSocket | null = null;
 
@@ -18,6 +18,7 @@ export class GameBridge {
     this.client = ioClient(this.gameServiceUrl, {
       reconnection: true,
       reconnectionDelay: 2000,
+      transports: ['polling', 'websocket'],
       auth: {
         clientType: 'service',
         serviceName: 'score-service',
@@ -47,7 +48,7 @@ export class GameBridge {
     //game-service emite 'game:over' com GameOverPayload
     this.client.on('game:over', (payload: GameOverPayload) => {
       console.log(
-        `game:over recebido. reason=${payload.reason}, winner=${payload.winner}`
+        `[ScoreService] game:over received reason=${payload.reason} winner=${payload.winner ?? 'n/a'} players=${Object.keys(payload.players ?? {}).join(',') || 'none'} discoveredAnimals=${payload.discoveredAnimals?.length ?? 0}`
       );
 
       try {
@@ -55,7 +56,9 @@ export class GameBridge {
 
         //Propaga para todos os clientes conectados ao score-service
         this.io.emit('game:result', result);
-        console.log('game:result emitido para os clientes.');
+        console.log(
+          `[ScoreService] game:result emitted reason=${result.reason} winner=${result.winner ?? 'n/a'} animalScores=${result.animalScores.length} playerSummaries=${result.playerSummaries.length}`
+        );
       } catch (err) {
         console.error('Erro ao processar game:over:', err);
       }

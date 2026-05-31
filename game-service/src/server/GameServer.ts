@@ -136,6 +136,7 @@ export class GameServer {
         .getPlayerIds()
         .find((id) => id !== playerId) ?? null;
 
+      // Elimination ends the match only on the second death of the same player.
       this.emitGameOver(
         winnerId,
         'elimination',
@@ -156,7 +157,8 @@ export class GameServer {
   private checkAllAnimalsDiscovered(): void {
     if (!this.room.allAnimalsDiscovered()) return;
 
-    //Ganha quem tiver mais animais descobertos; empate → null
+    // Exploration ends when every room animal has been discovered.
+    // Ganha quem tiver mais animais descobertos; empate → null.
     const winnerId = this.room.getLeadingPlayerId();
     this.emitGameOver(winnerId, 'exploration');
   }
@@ -308,22 +310,36 @@ export class GameServer {
     });
 
     socket.on(SocketEvents.PUZZLE_END, (data: { animalId?: string }) => {
-      if (!this.room.getActivePuzzleAnimalId()) return;
-      if (data?.animalId !== this.room.getActivePuzzleAnimalId()) return;
+      const activeAnimalId = this.room.getActivePuzzleAnimalId();
+      if (!activeAnimalId) return;
+      if (data?.animalId !== activeAnimalId) return;
 
       this.room.confirmPuzzleEnd(socket.id);
 
-      if (this.room.allPlayersEndedPuzzle()) {
-        if (data.animalId) {
-          const animal = this.room.getAnimal(data.animalId);
-          if (animal) {
-            animal.discovered = true;
-            animal.discoveredBy = socket.id;
-          }
-        }
+      const animal = this.room.getAnimal(activeAnimalId);
+      if (!animal || animal.discovered) {
         this.room.clearActivePuzzle();
-        this.checkAllAnimalsDiscovered();
+        return;
       }
+
+      animal.discovered = true;
+      animal.discoveredBy = socket.id;
+      this.room.clearActivePuzzle();
+
+      console.log(
+        `[GameServer] animal discovered animalId=${activeAnimalId} discoveredBy=${socket.id} discoveredCount=${this.room.getDiscoveredAnimalCount()} totalAnimals=${this.room.getAnimalCount()}`
+      );
+
+      this.io.to(this.roomName).emit(SocketEvents.PUZZLE_RESULT, {
+        animalId: activeAnimalId,
+        correct: true,
+        positions: [],
+        letter: '',
+        completed: true,
+        discovered: true,
+      });
+
+      this.checkAllAnimalsDiscovered();
     });
 
     socket.on(SocketEvents.PLAYER_HIT, (_data: { obstacleType: string }) => {
@@ -355,6 +371,7 @@ export class GameServer {
         }
 
         this.io.to(this.roomName).emit(SocketEvents.PUZZLE_RESULT, {
+          animalId: data.animalId,
           correct: result.correct,
           positions: result.positions,
           letter: data.letter.toLowerCase(),

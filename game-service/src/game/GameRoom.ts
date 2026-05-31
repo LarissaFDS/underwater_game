@@ -58,6 +58,12 @@ export class GameRoom {
 
   getAnimal(id: string): AnimalState | undefined { return this.animals.get(id); }
 
+  getAnimalCount(): number { return this.animals.size; }
+
+  getDiscoveredAnimalCount(): number {
+    return Array.from(this.animals.values()).filter((animal) => animal.discovered).length;
+  }
+
   allAnimalsDiscovered(): boolean {
     if (this.animals.size === 0) return false;
     return Array.from(this.animals.values()).every((a) => a.discovered);

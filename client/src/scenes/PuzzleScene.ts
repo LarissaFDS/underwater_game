@@ -372,6 +372,12 @@ export class PuzzleScene extends Phaser.Scene {
       return;
     }
 
+    if (payload.completed || payload.discovered) {
+      this.applyServerHiddenName(payload);
+      this.completePuzzle(false);
+      return;
+    }
+
     const letter = this.normalizeLetter(payload.letter);
 
     if (!letter) {

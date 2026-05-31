@@ -82,7 +82,7 @@ export class ScoreSocketManager {
         reconnectionDelay: 3000,
         reconnectionDelayMax: 10000,
         timeout: 10000,
-        transports: ["websocket", "polling"],
+        transports: ["polling", "websocket"],
       });
       this.socket.on("connect", () => {
         this.hasLoggedReconnectFailure = false;
