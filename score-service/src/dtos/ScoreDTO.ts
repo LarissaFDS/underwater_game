@@ -10,7 +10,7 @@ export interface GameOverPayload {
   
   export interface RawPlayerState {
     id: string;
-    playerId?: string; // <-- Adicione isto
+    playerId?: string; 
     socketId?: string;
     hearts: number;
     oxygen: number;

@@ -12,6 +12,7 @@ export class GameServer {
   private readonly room: GameRoom;
   private readonly roomName: string;
   private readonly serviceRoomName: string;
+  private lastCorrectGuesses = new Map<string, string>(); // Guarda: animalId -> socket.id de quem acertou
   private readonly playerSocketsByClientInstanceId = new Map<string, string>();
   private readonly puzzleApiUrl: string;
   private readonly corsOrigin: string | string[];
@@ -120,7 +121,6 @@ export class GameServer {
       discoveredAnimals,
     };
 
-    // ✅ Cache so reconnecting services can catch up
     this.lastGameOverPayload = payload;
 
     this.io
@@ -143,7 +143,6 @@ export class GameServer {
         .getPlayerIds()
         .find((id) => id !== playerId) ?? null;
 
-      // Elimination ends the match only on the second death of the same player.
       this.emitGameOver(
         winnerId,
         'elimination',
@@ -151,8 +150,6 @@ export class GameServer {
         playerId
       );
     } else {
-      // First death is only an individual respawn. Match reset still uses
-      // PlayerState.reset(), which clears deathCount for a new game.
       player.respawn();
       this.room.clearActivePuzzle();
 
@@ -164,7 +161,6 @@ export class GameServer {
   private checkAllAnimalsDiscovered(): void {
     if (!this.room.allAnimalsDiscovered()) return;
 
-    // Exploration ends when every room animal has been discovered.
     // Ganha quem tiver mais animais descobertos; empate → null.
     const winnerId = this.room.getLeadingPlayerId();
     this.emitGameOver(winnerId, 'exploration');
@@ -191,13 +187,11 @@ export class GameServer {
         console.log(`[GameServer] service connected socket=${socket.id} serviceName=${serviceName ?? 'unknown'}`);
         socket.join(this.serviceRoomName);
       
-        // ✅ If game:over was already emitted and service missed it, replay immediately
         if (this.lastGameOverPayload) {
           socket.emit(SocketEvents.GAME_OVER, this.lastGameOverPayload);
           console.log('[GameServer] replayed last game:over to reconnected service');
         }
       
-        // ✅ Allow service to request a replay at any time
         socket.on('service:getLastGameOver', () => {
           if (this.lastGameOverPayload) {
             socket.emit(SocketEvents.GAME_OVER, this.lastGameOverPayload);
@@ -240,7 +234,7 @@ export class GameServer {
         this.loadCatalog().then(() => {
           const seed = this.room.generateSeed();
           this.room.initializeAnimals();
-          this.lastGameOverPayload = null; // ✅ fresh game, clear cache
+          this.lastGameOverPayload = null;
           this.io.to(this.roomName).emit(SocketEvents.GAME_START, { seed, players: this.room.getPlayerIds() });
           this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
         });
@@ -334,7 +328,9 @@ export class GameServer {
       }
 
       animal.discovered = true;
-      animal.discoveredBy = socket.id;
+      const winnerSocketId = this.lastCorrectGuesses.get(activeAnimalId) || socket.id;
+      animal.discoveredBy = winnerSocketId;
+      this.lastCorrectGuesses.delete(activeAnimalId);
       this.room.clearActivePuzzle();
 
       console.log(
@@ -379,6 +375,9 @@ export class GameServer {
           //Registra erro no AnimalState para o score
           const animal = this.room.getAnimal(data.animalId);
           animal?.registerWrongGuess();
+        }
+        else { //registra que foi o uktimoa a acertar a letra (descoriu o animal)
+          this.lastCorrectGuesses.set(data.animalId, socket.id);
         }
 
         this.io.to(this.roomName).emit(SocketEvents.PUZZLE_RESULT, {
