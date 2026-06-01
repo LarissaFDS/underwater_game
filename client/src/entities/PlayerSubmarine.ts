@@ -2,70 +2,69 @@ import Phaser from "phaser";
 import type { PlayerDirection } from "../../../shared/types/Player";
 
 /**
- * Color palette used to visually distinguish submarine instances.
+ * Options accepted by the PlayerSubmarine constructor.
+ *
+ * `isPartner` tints the sprite slightly so remote partner submarines are
+ * visually distinct without changing gameplay bounds or collision logic.
  */
-interface SubmarineColors {
-  body: number;
-  tail: number;
-  cabin: number;
-  window: number;
+interface SubmarineOptions {
+  isPartner?: boolean;
 }
 
-const DEFAULT_COLORS: SubmarineColors = {
-  body: 0x2dd4bf,
-  tail: 0x14b8a6,
-  cabin: 0x38bdf8,
-  window: 0x0f172a,
-};
-
 /**
- * Phaser container that renders a player submarine.
+ * Phaser container that renders a player submarine using a PNG sprite.
+ *
+ * The container is the gameplay object (collision, position, camera follow).
+ * The internal sprite is the purely visual layer: it carries the idle tween
+ * and horizontal flip, so gameplay bounds are never altered by visual changes.
  *
  * GameScene uses one instance for the locally controlled player and another
- * instance, with alternate colors, as the remote partner representation.
+ * instance (isPartner: true) as the remote partner representation.
  */
 export class PlayerSubmarine extends Phaser.GameObjects.Container {
   private direction: PlayerDirection = "right";
-  private readonly colors: SubmarineColors;
+  private readonly sprite: Phaser.GameObjects.Image;
 
   constructor(
     scene: Phaser.Scene,
     x: number,
     y: number,
-    colors: Partial<SubmarineColors> = {}
+    options: SubmarineOptions = {}
   ) {
     super(scene, x, y);
-    this.colors = { ...DEFAULT_COLORS, ...colors };
 
-    this.createSubmarineBody();
+    this.sprite = scene.add.image(0, 0, "submarine");
+    this.sprite.setDisplaySize(120, 48);
 
+    // Tint the partner sprite so the two submarines are distinguishable.
+    if (options.isPartner) {
+      this.sprite.setTint(0x9ca3af);
+    }
+
+    this.add(this.sprite);
     scene.add.existing(this);
+
+    this.startIdleTween();
   }
 
   /**
-   * Creates the simple multi-part submarine shape used by both players.
+   * Soft vertical oscillation on the sprite only — the container stays still
+   * so movement logic and camera follow are not affected by the animation.
    */
-  private createSubmarineBody(): void {
-    const body = this.scene.add.ellipse(0, 0, 90, 36, this.colors.body);
-    const window = this.scene.add.circle(18, -2, 8, this.colors.window);
-    const tail = this.scene.add.triangle(
-      -48,
-      0,
-      0,
-      -16,
-      0,
-      16,
-      -24,
-      0,
-      this.colors.tail
-    );
-    const cabin = this.scene.add.rectangle(6, -22, 34, 16, this.colors.cabin);
-
-    this.add([tail, body, cabin, window]);
+  private startIdleTween(): void {
+    this.scene.tweens.add({
+      targets: this.sprite,
+      y: "+=3",
+      duration: 1200,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut",
+    });
   }
 
   /**
    * Mirrors the submarine horizontally without changing its gameplay position.
+   * Uses sprite.setFlipX instead of container scaling to keep getBounds() stable.
    */
   public setDirection(direction: PlayerDirection): void {
     if (this.direction === direction) {
@@ -73,12 +72,7 @@ export class PlayerSubmarine extends Phaser.GameObjects.Container {
     }
 
     this.direction = direction;
-
-    if (direction === "right") {
-      this.setScale(1, 1);
-    } else {
-      this.setScale(-1, 1);
-    }
+    this.sprite.setFlipX(direction === "left");
   }
 
   /**
