@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { getAnimalAssetKey } from "../assets/assetsMap";
 
 /**
  * Animal placement and discovery state provided by the backend or fallback map.
@@ -12,6 +13,9 @@ export interface AnimalConfig {
 }
 
 const DETECTION_RADIUS = 80;
+const ANIMAL_SIZE = 100;
+const PATROL_DISTANCE = 40;
+const PATROL_DURATION_MS = 2200;
 
 /**
  * Interactive animal marker in the map.
@@ -23,6 +27,7 @@ export class Animal extends Phaser.GameObjects.Container {
   public readonly id: string;
   public readonly detectionRadius = DETECTION_RADIUS;
   public discovered: boolean;
+  private patrolTween?: Phaser.Tweens.Tween;
 
   constructor(scene: Phaser.Scene, config: AnimalConfig) {
     super(scene, config.x, config.y);
@@ -32,6 +37,12 @@ export class Animal extends Phaser.GameObjects.Container {
     this.createVisuals(config.color ?? 0xf97316);
 
     scene.add.existing(this);
+
+    if (this.discovered) {
+      this.markDiscovered();
+    } else {
+      this.startPatrol();
+    }
   }
 
   /**
@@ -42,22 +53,44 @@ export class Animal extends Phaser.GameObjects.Container {
   }
 
   /**
-   * Draws the visible animal marker and its translucent detection area.
+   * Draws the visible animal sprite and keeps detection as an invisible area.
    */
-  private createVisuals(color: number): void {
+  private createVisuals(_color: number): void {
     const detectionArea = this.scene.add.circle(
       0,
       0,
       this.detectionRadius,
-      color,
-      0.08
+      0xffffff,
+      0
     );
-    detectionArea.setStrokeStyle(2, color, 0.35);
+    detectionArea.setVisible(false);
 
-    const body = this.scene.add.circle(0, 0, 22, color, 0.95);
-    body.setStrokeStyle(3, 0xffffff, 0.35);
+    const body = this.scene.add.image(0, 0, getAnimalAssetKey(this.id));
+    body.setDisplaySize(ANIMAL_SIZE, ANIMAL_SIZE);
 
     this.add([detectionArea, body]);
     this.setDepth(20);
+  }
+
+  private startPatrol(): void {
+    if (this.patrolTween || this.discovered) {
+      return;
+    }
+
+    this.patrolTween = this.scene.tweens.add({
+      targets: this,
+      x: this.x + PATROL_DISTANCE,
+      duration: PATROL_DURATION_MS,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
+  }
+
+  public markDiscovered(): void {
+    this.discovered = true;
+    this.patrolTween?.remove();
+    this.patrolTween = undefined;
+    this.setAlpha(0.3);
   }
 }

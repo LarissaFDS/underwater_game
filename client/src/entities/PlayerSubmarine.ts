@@ -1,22 +1,17 @@
 import Phaser from "phaser";
+import { SPRITE_KEYS } from "../assets/assetsMap";
 import type { PlayerDirection } from "../../../shared/types/Player";
 
 /**
- * Color palette used to visually distinguish submarine instances.
+ * Visual options used to render submarine instances.
  */
-interface SubmarineColors {
-  body: number;
-  tail: number;
-  cabin: number;
-  window: number;
+interface SubmarineVisualOptions {
+  assetKey: string;
 }
 
-const DEFAULT_COLORS: SubmarineColors = {
-  body: 0x2dd4bf,
-  tail: 0x14b8a6,
-  cabin: 0x38bdf8,
-  window: 0x0f172a,
-};
+const SUBMARINE_SIZE = 200;
+const COLLISION_WIDTH = 117;
+const COLLISION_HEIGHT = 48;
 
 /**
  * Phaser container that renders a player submarine.
@@ -26,42 +21,41 @@ const DEFAULT_COLORS: SubmarineColors = {
  */
 export class PlayerSubmarine extends Phaser.GameObjects.Container {
   private direction: PlayerDirection = "right";
-  private readonly colors: SubmarineColors;
+  private readonly sprite: Phaser.GameObjects.Image;
 
   constructor(
     scene: Phaser.Scene,
     x: number,
     y: number,
-    colors: Partial<SubmarineColors> = {}
+    options: Partial<SubmarineVisualOptions> = {}
   ) {
     super(scene, x, y);
-    this.colors = { ...DEFAULT_COLORS, ...colors };
 
-    this.createSubmarineBody();
+    this.sprite = this.createSubmarineSprite(
+      options.assetKey ?? SPRITE_KEYS.submarine
+    );
 
     scene.add.existing(this);
   }
 
   /**
-   * Creates the simple multi-part submarine shape used by both players.
+   * Creates the PNG submarine sprite used by both players.
    */
-  private createSubmarineBody(): void {
-    const body = this.scene.add.ellipse(0, 0, 90, 36, this.colors.body);
-    const window = this.scene.add.circle(18, -2, 8, this.colors.window);
-    const tail = this.scene.add.triangle(
-      -48,
-      0,
-      0,
-      -16,
-      0,
-      16,
-      -24,
-      0,
-      this.colors.tail
-    );
-    const cabin = this.scene.add.rectangle(6, -22, 34, 16, this.colors.cabin);
+  private createSubmarineSprite(assetKey: string): Phaser.GameObjects.Image {
+    const sprite = this.scene.add.image(0, 0, assetKey);
+    sprite.setDisplaySize(SUBMARINE_SIZE, SUBMARINE_SIZE);
 
-    this.add([tail, body, cabin, window]);
+    this.add(sprite);
+    this.scene.tweens.add({
+      targets: sprite,
+      y: sprite.y + 3,
+      duration: 1200,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
+
+    return sprite;
   }
 
   /**
@@ -74,11 +68,7 @@ export class PlayerSubmarine extends Phaser.GameObjects.Container {
 
     this.direction = direction;
 
-    if (direction === "right") {
-      this.setScale(1, 1);
-    } else {
-      this.setScale(-1, 1);
-    }
+    this.sprite.setFlipX(direction === "left");
   }
 
   /**
@@ -86,5 +76,16 @@ export class PlayerSubmarine extends Phaser.GameObjects.Container {
    */
   public getDirection(): PlayerDirection {
     return this.direction;
+  }
+
+  public getBounds(output?: Phaser.Geom.Rectangle): Phaser.Geom.Rectangle {
+    const bounds = output ?? new Phaser.Geom.Rectangle();
+
+    return bounds.setTo(
+      this.x - COLLISION_WIDTH / 2,
+      this.y - COLLISION_HEIGHT / 2,
+      COLLISION_WIDTH,
+      COLLISION_HEIGHT
+    );
   }
 }

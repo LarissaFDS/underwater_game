@@ -20,6 +20,28 @@ Ele roda separado do backend e se comunica com ele via Socket.IO. O frontend nã
 - `MovementSystem`: componente de lógica de movimento local. Mantém velocidade, direção visual e cálculo por delta fora da `GameScene`.
 - `MapGenerationSystem`: componente de geração do mapa. Usa seed para criar grade, obstáculos e decorações.
 
+## 2.1. Sprites e HUD do gameplay
+
+Os sprites PNG do gameplay ficam em `client/src/assets` e são centralizados em `client/src/assets/assetsMap.ts`, que define as chaves carregadas pelo Phaser. A `GameScene.preload()` percorre esse mapa e carrega:
+
+- `submarine` com `submarines/blue_submarine.png`;
+- `submarine-partner` com `submarines/red_submarine.png`;
+- `animal-clownfish` com `animals/clown_fish.png`;
+- `animal-turtle` com `animals/turtle.png`;
+- `animal-octopus` com `animals/octopus.png`;
+- `animal-hammerhead` com `animals/hammer_shark.png`;
+- `animal-stingray` com `animals/stingray.png`;
+- `heart` com `ui/heart.png`;
+- `oxygen-bubble` com `ui/o2-bubble.png`.
+
+`PlayerSubmarine` renderiza o submarino com `this.add.image()` usando PNG, com tamanho visual de 200x200. A instância local usa `submarine`; a representação remota usa `submarine-partner`. A oscilação de idle é aplicada ao sprite interno por tween, sem alterar a posição do container usado por movimento, câmera, colisão e multiplayer.
+
+`Animal` escolhe o sprite pelo id recebido do backend ou do fallback local: peixe-palhaço, tartaruga, polvo, tubarão-martelo e arraia apontam para suas respectivas chaves em `assetsMap.ts`. Cada animal é renderizado como PNG 100x100 e cria uma única patrulha horizontal curta via tween, avançando cerca de 40px no eixo X com `yoyo: true` e `repeat: -1`; o raio de detecção permanece como lógica interna invisível. Quando catalogado, o animal chama `markDiscovered()`, fica com `alpha = 0.3`, para o tween de patrulha e continua visível.
+
+`HUD` continua fixo na câmera com `setScrollFactor(0)`. Os corações passaram a usar `ui/heart.png`; acima da barra de O2, o HUD exibe `ui/o2-bubble.png` alinhado ao início da barra e o texto "Oxigênio" à direita. O cálculo de O2, vidas, pontuação e eventos recebidos permanece igual.
+
+Essas mudanças são exclusivamente de frontend em `client/`; não alteram backend, microserviços, contratos Socket.IO, DTOs, eventos ou serviços.
+
 ## 3. Comunicação com backend
 
 | Evento | Direção | Responsabilidade |
@@ -67,7 +89,7 @@ O `score-service` é o microsserviço responsável pela pontuação final da par
 
 A `EndScene` apenas apresenta o payload recebido. Ela não recalcula vencedor, bônus, penalidades ou totais; isso garante que os dois clientes mostrem a mesma pontuação enviada pelo backend. Campos ausentes no payload devem receber fallback visual seguro para não quebrar a tela.
 
-Em produção, a `EndScene` depende do `game:result` vindo do Socket.IO público do `score-service`. O serviço precisa expor o path padrão `/socket.io` na URL pública configurada em `VITE_SCORE_URL`, com CORS permitindo a origem do frontend. Se o `score-service` demorar ou estiver indisponível, o frontend abre uma tela final com mensagem controlada e sem recalcular pontuação localmente.
+Em produção, a `EndScene` depende do `game:result` vindo do Socket.IO público do `score-service`. O serviço precisa expor o path padrão `/socket.io` na URL pública configurada em `VITE_SCORE_URL`, com CORS permitindo a origem do frontend. O frontend aguarda o resultado calculado pelo `score-service` e não cria pontuação local para mascarar indisponibilidade.
 
 O `ScoreSocketManager` mantém polling e websocket habilitados para compatibilidade com o Render; polling inicia a conexão e o Socket.IO pode fazer upgrade para websocket quando disponível.
 
