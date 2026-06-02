@@ -143,6 +143,7 @@ interface ServerToClientEvents {
   "state:update": (payload: StateUpdatePayload) => void;
   "player:gameover": (payload: PlayerGameOverPayload) => void;
   "game:over": (payload: GameOverPayload) => void;
+  "partner:disconnected": () => void;
 }
 
 /**
@@ -342,6 +343,19 @@ export class SocketManager {
     const socket = this.connect();
     socket.on("game:over", handler);
     return () => socket.off("game:over", handler);
+  }
+
+  public onPartnerDisconnected(handler: () => void): () => void {
+    if (!this.socket) return () => {};
+    this.socket.on("partner:disconnected", handler);
+    return () => this.socket?.off("partner:disconnected", handler);
+  }
+  
+  public disconnect(): void {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = undefined;
+    }
   }
 
   private getServerUrl(): string {

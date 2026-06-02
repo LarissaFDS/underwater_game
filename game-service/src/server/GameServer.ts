@@ -12,11 +12,12 @@ export class GameServer {
   private readonly room: GameRoom;
   private readonly roomName: string;
   private readonly serviceRoomName: string;
-  private lastCorrectGuesses = new Map<string, string>(); // Guarda: animalId -> socket.id de quem acertou
+  private lastCorrectGuesses = new Map<string, string>(); //Guarda: animalId -> socket.id de quem acertou
   private readonly playerSocketsByClientInstanceId = new Map<string, string>();
   private readonly puzzleApiUrl: string;
   private readonly corsOrigin: string | string[];
   private readonly instanceId: string;
+  private roomDestructionTimeout: NodeJS.Timeout | null = null; //para destruição da sala dps de 10s
 
   constructor() {
     this.app = express();
@@ -35,7 +36,7 @@ export class GameServer {
     this.io = new Server(this.server, {
       cors: { origin: this.corsOrigin, methods: ['GET', 'POST'] },
       transports: ['websocket', 'polling'],
-      pingInterval: 15_000,   // default is 25s — too close to Render's 30s idle limit
+      pingInterval: 15_000,   //default is 25s — too close to Render's 30s idle limit
       pingTimeout:  10_000,
     });
     
@@ -161,7 +162,7 @@ export class GameServer {
   private checkAllAnimalsDiscovered(): void {
     if (!this.room.allAnimalsDiscovered()) return;
 
-    // Ganha quem tiver mais animais descobertos; empate → null.
+    //Ganha quem tiver mais animais descobertos; empate → null.
     const winnerId = this.room.getLeadingPlayerId();
     this.emitGameOver(winnerId, 'exploration');
   }
@@ -210,8 +211,8 @@ export class GameServer {
         this.replaceDuplicatePlayerSocket(clientInstanceId, socket.id);
       }
 
-      // Sockets de microsserviços e conexões duplicadas da mesma aba não entram
-      // no matchmaking; apenas jogadores reais mantidos em GameRoom contam.
+      //Sockets de microsserviços e conexões duplicadas da mesma aba não entram
+      //no matchmaking; apenas jogadores reais mantidos em GameRoom contam.
       if (this.room.playerCount >= this.room.maxPlayers) {
         console.warn(
           `[GameServer] room:full instance=${this.instanceId} socket=${socket.id} clientInstanceId=${clientInstanceId ?? 'n/a'} playerCount=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
@@ -442,23 +443,44 @@ export class GameServer {
         `[GameServer] disconnected instance=${this.instanceId} socket=${socket.id} clientInstanceId=${socket.data.clientInstanceId ?? 'n/a'} playerCountBefore=${playerCountBefore} playersBefore=${this.room.getPlayerIds().join(',') || 'none'}`
       );
 
-      const hadActivePuzzle = this.room.getActivePuzzleAnimalId() !== null;
       this.room.removePlayer(socket.id);
       this.removePlayerSocketMapping(socket);
 
-      console.log(
-        `[GameServer] player removed instance=${this.instanceId} socket=${socket.id} playerCountAfter=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
-      );
-
+      //CENÁRIO 1: O último (ou único) jogador saiu. Destruir imediatamente.
       if (this.room.playerCount === 0) {
         this.room.clearAnimals();
         this.room.clearActivePuzzle();
-      } else if (hadActivePuzzle && this.room.allPlayersEndedPuzzle()) {
-        this.room.clearActivePuzzle();
+        
+        //Se havia um timer de destruição rodando, limpa para evitar memory leak
+        if (this.roomDestructionTimeout) {
+          clearTimeout(this.roomDestructionTimeout);
+          this.roomDestructionTimeout = null;
+        }
+        console.log('[GameServer] Sala vazia. Estado limpo.');
+      } 
+      //CENÁRIO 2 e 4: Um jogador saiu, mas o outro ainda está na sala.
+      else if (this.room.playerCount === 1) {
+        console.log('[GameServer] Parceiro desconectou. Notificando jogador restante e iniciando timer de 10s.');
+        
+        //Emite o evento para o jogador que ficou
+        this.io.to(this.roomName).emit('partner:disconnected');
+
+        //Agenda a destruição da sala após 10 segundos
+        this.roomDestructionTimeout = setTimeout(() => {
+          console.log('[GameServer] Timeout de 10s atingido. Destruindo sala.');
+          this.room.clearAnimals();
+          this.room.clearActivePuzzle();
+          
+          //Opcional, dependendo da sua GameRoom: this.room.reset();
+          
+          //Desconecta à força qualquer socket que tenha ficado "preso" na sala
+          this.io.in(this.roomName).disconnectSockets(true);
+          this.roomDestructionTimeout = null;
+        }, 10000);
       }
     });
   }
-
+  
   private removePlayerSocketMapping(socket: Socket): void {
     const clientInstanceId = socket.data.clientInstanceId;
 

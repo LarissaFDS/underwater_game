@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { GAME_ASSETS, SPRITE_KEYS } from "../assets/assetsMap";
 import {
   DEPTH_OVERLAY_MAX_ALPHA,
   MAP_HEIGHT,
@@ -43,7 +44,6 @@ const FALLBACK_ANIMALS: AnimalStatePayload[] = [
 const SPAWN_X = 0;
 const SPAWN_Y = 0;
 const OBSTACLE_HIT_COOLDOWN_MS = 1000;
-const SCORE_RESULT_TIMEOUT_MS = 12000;
 
 /**
  * Main gameplay scene.
@@ -74,9 +74,6 @@ export class GameScene extends Phaser.Scene {
   private lastMoveEmissionTime = 0;
   private unsubscribeSocketEvents: Array<() => void> = [];
   private unsubscribeScoreResult?: () => void;
-  private scoreResultTimeoutId?: ReturnType<typeof setTimeout>;
-  private scoreStatusOverlay?: Phaser.GameObjects.Container;
-  private finalGameOverPayload?: GameOverPayload;
   private isPuzzleActive = false;
   private pendingPuzzleAnimalId?: string;
   private pendingPuzzleTimeout?: Phaser.Time.TimerEvent;
@@ -120,11 +117,17 @@ export class GameScene extends Phaser.Scene {
     this.isPuzzleActive = false;
     this.isGameOver = false;
     this.hasOpenedEndScene = false;
-    this.finalGameOverPayload = undefined;
     this.lastObstacleHitTime = -OBSTACLE_HIT_COOLDOWN_MS;
-    this.clearScoreResultTimeout();
-    this.destroyScoreStatusOverlay();
     this.clearPendingPuzzle();
+  }
+
+  /**
+   * Loads gameplay PNG sprites before any world object tries to render them.
+   */
+  preload(): void {
+    GAME_ASSETS.forEach(({ key, url }) => {
+      this.load.image(key, url);
+    });
   }
 
   /**
@@ -134,8 +137,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor("#0a1628");
     this.mapGenerationSystem = new MapGenerationSystem(this);
     this.playerIds = this.getPlayerIds();
-    // Socket.IO assigns the local id; GameScene uses it to separate local
-    // player updates from the partner's remote representation.
+    //Socket.IO assigns the local id; GameScene uses it to separate local
+    //player updates from the partner's remote representation.
     this.localPlayerId = socketManager.currentSocket?.id;
 
     const mapSeed = this.getMapSeed();
@@ -145,17 +148,14 @@ export class GameScene extends Phaser.Scene {
     this.createAnimals();
 
     this.player = new PlayerSubmarine(this, MAP_WIDTH / 2, MAP_HEIGHT / 2);
-    // The partner submarine is visual-only on this client. It is positioned by
-    // backend updates rather than by local input.
+    //The partner submarine is visual-only on this client. It is positioned by
+    //backend updates rather than by local input.
     this.partner = new PlayerSubmarine(
       this,
       this.partnerTarget.x,
       this.partnerTarget.y,
       {
-        body: 0x9ca3af,
-        tail: 0x6b7280,
-        cabin: 0xd1d5db,
-        window: 0x111827,
+        assetKey: SPRITE_KEYS.submarinePartner,
       }
     );
     this.movementSystem = new MovementSystem();
@@ -184,8 +184,8 @@ export class GameScene extends Phaser.Scene {
       socketManager.onPlayerMoved((payload: PlayerMovedPayload) => {
         const currentSocketId = socketManager.currentSocket?.id;
 
-        // Ignore echoed local movement so the local submarine stays controlled
-        // by immediate input instead of network interpolation.
+        //Ignore echoed local movement so the local submarine stays controlled
+        //by immediate input instead of network interpolation.
         if (
           payload.id === this.localPlayerId ||
           payload.id === currentSocketId
@@ -212,8 +212,8 @@ export class GameScene extends Phaser.Scene {
         this.triggeredAnimalIds.add(payload.animalId);
         this.animalsInRange.clear();
         this.releasePuzzleLockOnShutdown();
-        // PuzzleScene is launched as an overlay and GameScene pauses so local
-        // movement does not continue while the player answers the minigame.
+        //PuzzleScene is launched as an overlay and GameScene pauses so local
+        //movement does not continue while the player answers the minigame.
         this.scene.launch("PuzzleScene", payload);
         this.pauseGameSceneIfActive();
       }),
@@ -225,6 +225,9 @@ export class GameScene extends Phaser.Scene {
       }),
       socketManager.onGameOver((payload: GameOverPayload) => {
         this.handleGameOver(payload);
+      }),
+      socketManager.onPartnerDisconnected(() => {
+        this.handlePartnerDisconnected();
       })
     );
     this.unsubscribeScoreResult = scoreSocketManager.onGameResult(
@@ -234,7 +237,7 @@ export class GameScene extends Phaser.Scene {
     );
 
     if (socketManager.currentState) {
-      // A scene may start after the backend has already sent a snapshot.
+      //A scene may start after the backend has already sent a snapshot.
       this.applyStateUpdate(socketManager.currentState);
     }
 
@@ -242,8 +245,6 @@ export class GameScene extends Phaser.Scene {
       this.removeActivityListeners();
       this.game.events.off("animal:discovered", this.handleAnimalDiscovered);
       this.clearPendingPuzzle();
-      this.clearScoreResultTimeout();
-      this.destroyScoreStatusOverlay();
       this.removeAllSocketEventListeners();
     });
   }
@@ -263,8 +264,8 @@ export class GameScene extends Phaser.Scene {
         delta
       );
 
-      // Only the local submarine emits local actions. The partner is updated
-      // from server events and never sends input from this client.
+      //Only the local submarine emits local actions. The partner is updated
+      //from server events and never sends input from this client.
       this.player.x = Phaser.Math.Clamp(this.player.x, 0, MAP_WIDTH);
       this.player.y = Phaser.Math.Clamp(this.player.y, 0, MAP_HEIGHT);
       this.emitPlayerPosition(time);
@@ -368,11 +369,7 @@ export class GameScene extends Phaser.Scene {
 
   private createAnimals(): void {
     this.animals = this.getAnimalData().map(
-      (animalData, index) =>
-        new Animal(this, {
-          ...animalData,
-          color: this.getAnimalColor(index),
-        })
+      (animalData) => new Animal(this, animalData)
     );
   }
 
@@ -380,11 +377,6 @@ export class GameScene extends Phaser.Scene {
     return this.sceneData.animals?.length
       ? this.sceneData.animals
       : FALLBACK_ANIMALS;
-  }
-
-  private getAnimalColor(index: number): number {
-    const colors = [0xf97316, 0x22c55e, 0xa855f7, 0xef4444, 0x38bdf8];
-    return colors[index % colors.length];
   }
 
   /**
@@ -424,9 +416,9 @@ export class GameScene extends Phaser.Scene {
 
       this.animalsInRange.add(animal.id);
       this.setPendingPuzzle(animal.id);
-      // The backend decides whether proximity should open a puzzle; the
-      // frontend only reports that the local player reached an animal radius.
-      // Debug
+      //The backend decides whether proximity should open a puzzle; the
+      //frontend only reports that the local player reached an animal radius.
+      //Debug
       console.log("Emitting animal:approach", animal.id);
       socketManager.emitAnimalApproach({ animalId: animal.id });
     });
@@ -453,8 +445,8 @@ export class GameScene extends Phaser.Scene {
 
     this.lastObstacleHitTime = time;
     this.flashSubmarine(this.player);
-    // Obstacle damage is emitted as a local action; O2/hearts changes still
-    // come back through backend state events.
+    //Obstacle damage is emitted as a local action; O2/hearts changes still
+    //come back through backend state events.
     socketManager.emitPlayerHit({ obstacleType: obstacle.obstacleType });
   }
 
@@ -500,8 +492,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Position emission is throttled so normal pointer movement does not flood
-    // the Socket.IO channel.
+    //Position emission is throttled so normal pointer movement does not flood
+    //the Socket.IO channel.
     socketManager.emitPlayerMove({
       x: this.player.x,
       y: this.player.y,
@@ -513,8 +505,8 @@ export class GameScene extends Phaser.Scene {
    * Smooths the remote partner toward the latest backend-provided target.
    */
   private updatePartnerPosition(delta: number): void {
-    // Remote movement is interpolated toward the latest backend target to hide
-    // network update gaps without taking ownership of partner control.
+    //Remote movement is interpolated toward the latest backend target to hide
+    //network update gaps without taking ownership of partner control.
     const lerpFactor = Phaser.Math.Clamp(delta / 120, 0.08, 0.22);
     const previousX = this.partner.x;
 
@@ -570,8 +562,8 @@ export class GameScene extends Phaser.Scene {
   private applyStateUpdate(payload: StateUpdatePayload): void {
     const localPlayerId = this.getLocalPlayerId();
 
-    // `state:update` is the source of truth for player resources. It updates
-    // the local HUD and the partner HUD separately based on the socket id.
+    //`state:update` is the source of truth for player resources. It updates
+    //the local HUD and the partner HUD separately based on the socket id.
     Object.entries(payload).forEach(([id, playerState]) => {
       const playerId = playerState.id || id;
       const isLocalPlayer =
@@ -600,8 +592,8 @@ export class GameScene extends Phaser.Scene {
    * Handles a single-player oxygen/heart loss flow without ending the match.
    */
   private handlePlayerGameOver(payload: PlayerGameOverPayload): void {
-    // Player-level game over can respawn one submarine without ending the
-    // entire match. The affected socket id decides which visual object moves.
+    //Player-level game over can respawn one submarine without ending the
+    //entire match. The affected socket id decides which visual object moves.
     this.applyStateUpdate(payload.state ?? payload.players ?? {});
 
     const affectedPlayerId = this.getPayloadPlayerId(payload);
@@ -634,21 +626,95 @@ export class GameScene extends Phaser.Scene {
    * over. Final score and winner presentation wait for `game:result`, because
    * score-service is the source of truth for match scoring.
    */
-  private handleGameOver(payload: GameOverPayload): void {
+  private handleGameOver(_payload: GameOverPayload): void {
     if (this.isGameOver) {
       return;
     }
 
     this.isGameOver = true;
-    this.finalGameOverPayload = payload;
     this.closePuzzleForFinalGameOver();
     this.removeGameplaySocketEventListeners();
-    this.showScoreStatusOverlay(
-      "Calculando pontuação...",
-      "Aguardando resultado do score-service."
-    );
-    this.startScoreResultTimeout();
-    //sscoreSocketManager.requestLatestResult();
+    this.pauseGameSceneIfActive();
+  }
+
+  private handlePartnerDisconnected(): void {
+    if (this.isGameOver) return; //Ignora se o jogo já acabou naturalmente
+    this.isGameOver = true;
+
+    //Fecha o puzzle se estiver aberto
+    this.closePuzzleForFinalGameOver(); 
+    
+    //garante que a cena principal seja "despausada". 
+    if (this.scene.isPaused("GameScene")) {
+      this.scene.resume("GameScene");
+    }
+
+    //Remove listeners de movimento para travar o submarino
+    this.removeGameplaySocketEventListeners();
+
+    // Exibe o modal
+    this.showPartnerDisconnectedModal();
+  }
+
+  private showPartnerDisconnectedModal(): void {
+    const { width, height } = this.scale;
+    const overlay = this.add.container(width / 2, height / 2);
+    overlay.setScrollFactor(0);
+    overlay.setDepth(2000); //Fica acima de TUDO, inclusive do DepthOverlay
+
+    //Fundo escurecido
+    const bg = this.add.rectangle(0, 0, width, height, 0x000000, 0.8)
+      .setScrollFactor(0) //para o botao movimentar
+      .setInteractive(); //Bloqueia cliques atrás do modal
+
+    //Painel do Modal
+    const panel = this.add.rectangle(0, 0, 400, 220, 0x0f172a, 0.95)
+      .setStrokeStyle(2, 0xef4444, 1);
+
+    const titleText = this.add.text(0, -50, "Conexão perdida", {
+      fontSize: "26px",
+      color: "#f8fafc",
+      align: "center",
+    }).setOrigin(0.5);
+
+    const messageText = this.add.text(0, 0, "O seu parceiro desconectou\ne a sala foi encerrada.", {
+      fontSize: "18px",
+      color: "#fca5a5",
+      align: "center",
+      wordWrap: { width: 360 }
+    }).setOrigin(0.5);
+
+    //Botão Voltar ao Menu
+    const btnBg = this.add.rectangle(0, 65, 220, 45, 0x1d4ed8)
+      .setScrollFactor(0) 
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => btnBg.setFillStyle(0x2563eb))
+      .on("pointerout", () => btnBg.setFillStyle(0x1d4ed8))
+      .on("pointerdown", () => {
+        //Desconecta do servidor
+        if (typeof socketManager.disconnect === 'function') {
+          socketManager.disconnect(); 
+        }
+
+        //Garante que nenhuma cena sobreposta fique esquecida na tela
+        if (this.scene.isActive("PuzzleScene") || this.scene.isPaused("PuzzleScene")) {
+          this.scene.stop("PuzzleScene");
+        }
+        if (this.scene.isActive("EndScene") || this.scene.isPaused("EndScene")) {
+          this.scene.stop("EndScene");
+        }
+
+        //Reinicia a GameScene (para limpar o modal) e volta pro menu
+        this.scene.start("MenuScene");
+      });
+
+    const btnText = this.add.text(0, 65, "Voltar ao menu", {
+      fontSize: "18px",
+      color: "#ffffff",
+      fontStyle: "bold"
+    }).setOrigin(0.5);
+
+    overlay.add([bg, panel, titleText, messageText, btnBg, btnText]);
   }
 
   /**
@@ -658,122 +724,16 @@ export class GameScene extends Phaser.Scene {
    * mutate scoring fields, which keeps both clients aligned with score-service.
    */
   private handleGameResult(payload: GameResultPayload): void {
-    if (this.hasOpenedEndScene) return;
-  
-    // ✅ Descarta resultado antigo se o reason não bate com o jogo atual
-    if (!payload.scoreServiceUnavailable && this.finalGameOverPayload?.reason) {
-      if (payload.reason && payload.reason !== this.finalGameOverPayload.reason) {
-        console.warn("[GameScene] game:result com reason diferente — resultado antigo descartado");
-        return;
-      }
-    }
-  
-    this.hasOpenedEndScene = true;
-    this.isGameOver = true;
-    this.closePuzzleForFinalGameOver();
-    this.clearScoreResultTimeout();
-    this.destroyScoreStatusOverlay();
-    this.removeAllSocketEventListeners();
-    this.scene.launch("EndScene", payload);
-    this.pauseGameSceneIfActive();
-  }
-
-  private startScoreResultTimeout(): void {
-    this.clearScoreResultTimeout();
-    let attempts = 0;
-    const maxAttempts = 4; // 4 × 3s = 12s total
-  
-    const tryFetch = () => {
-      attempts++;
-      console.log(`[GameScene] score:getLatest tentativa ${attempts}/${maxAttempts}`);
-      scoreSocketManager.requestLatestResult();
-  
-      if (attempts < maxAttempts) {
-        // ✅ window.setTimeout nunca é pausado pelo Phaser
-        this.scoreResultTimeoutId = window.setTimeout(tryFetch, 3000);
-      } else {
-        this.openScoreUnavailableEndScene();
-      }
-    };
-  
-    // Espera 2s antes da primeira tentativa:
-    // dá tempo do game:result chegar naturalmente pelo WebSocket
-    this.scoreResultTimeoutId = window.setTimeout(tryFetch, 2000);
-  }
-
-  private clearScoreResultTimeout(): void {
-    if (this.scoreResultTimeoutId !== undefined) {
-      clearTimeout(this.scoreResultTimeoutId);
-      this.scoreResultTimeoutId = undefined;
-    }
-  }
-
-  // DEPOIS — tenta HTTP antes de exibir fallback
-  private async openScoreUnavailableEndScene(): Promise<void> {
     if (this.hasOpenedEndScene) {
       return;
     }
 
-    console.warn("[GameScene] score-service timeout: tentando fallback HTTP...");
-
-    try {
-      const httpResult = await scoreSocketManager.fetchLatestResultHttp();
-
-      if (httpResult && !this.hasOpenedEndScene) {
-        console.log("[GameScene] resultado obtido via HTTP fallback");
-        this.handleGameResult(httpResult);
-        return;
-      }
-    } catch (err) {
-      console.error("[GameScene] HTTP fallback falhou", err);
-    }
-
-    // Só chega aqui se o HTTP também falhou
-    console.warn("[GameScene] abrindo EndScene sem pontuação");
-    this.handleGameResult({
-      ...this.finalGameOverPayload,
-      scoreServiceUnavailable: true,
-      message:
-        "Pontuação indisponível no momento. O resultado do score-service não chegou.",
-      animalScores: [],
-      playerSummaries: [],
-    });
-  }
-
-  private showScoreStatusOverlay(title: string, message: string): void {
-    this.destroyScoreStatusOverlay();
-
-    const { width, height } = this.scale;
-    const overlay = this.add.container(width / 2, height / 2);
-    overlay.setScrollFactor(0);
-    overlay.setDepth(1300);
-
-    const panel = this.add
-      .rectangle(0, 0, 540, 160, 0x020617, 0.9)
-      .setStrokeStyle(2, 0x38bdf8, 0.86);
-    const titleText = this.add
-      .text(0, -28, title, {
-        fontSize: "28px",
-        color: "#f8fafc",
-        align: "center",
-      })
-      .setOrigin(0.5);
-    const messageText = this.add
-      .text(0, 32, message, {
-        fontSize: "18px",
-        color: "#bae6fd",
-        align: "center",
-        wordWrap: { width: 460 },
-      })
-      .setOrigin(0.5);
-
-    overlay.add([panel, titleText, messageText]);
-    this.scoreStatusOverlay = overlay;
-  }
-
-  private destroyScoreStatusOverlay(): void {
-    this.scoreStatusOverlay?.destroy(true);
-    this.scoreStatusOverlay = undefined;
+    this.hasOpenedEndScene = true;
+    this.isGameOver = true;
+    this.closePuzzleForFinalGameOver();
+    this.removeAllSocketEventListeners();
+    this.scene.launch("EndScene", payload);
+    this.pauseGameSceneIfActive();
   }
 
   private pauseGameSceneIfActive(): void {
@@ -800,11 +760,6 @@ export class GameScene extends Phaser.Scene {
   
     if (this.scene.isActive("PuzzleScene") || this.scene.isPaused("PuzzleScene")) {
       this.scene.stop("PuzzleScene");
-    }
-  
-    // ✅ Se GameScene estava pausada pela PuzzleScene, retoma para o timer funcionar
-    if (this.scene.isPaused("GameScene")) {
-      this.scene.resume("GameScene");
     }
   }
 
@@ -869,8 +824,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    animal.discovered = true;
-    animal.setAlpha(0.45);
+    animal.markDiscovered();
     this.triggeredAnimalIds.add(animalId);
     this.animalsInRange.delete(animalId);
   }
