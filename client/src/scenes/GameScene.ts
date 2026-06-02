@@ -684,11 +684,20 @@ export class GameScene extends Phaser.Scene {
       .on("pointerover", () => btnBg.setFillStyle(0x2563eb))
       .on("pointerout", () => btnBg.setFillStyle(0x1d4ed8))
       .on("pointerdown", () => {
-        //Desconecta o próprio socket ativamente para garantir que a sala seja limpa 
-        //imediatamente no backend (antes mesmo dos 10s)
-        socketManager.disconnect(); 
-        
-        //Volta para o Menu limpo
+        //Desconecta do servidor
+        if (typeof socketManager.disconnect === 'function') {
+          socketManager.disconnect(); 
+        }
+
+        //Garante que nenhuma cena sobreposta fique esquecida na tela
+        if (this.scene.isActive("PuzzleScene") || this.scene.isPaused("PuzzleScene")) {
+          this.scene.stop("PuzzleScene");
+        }
+        if (this.scene.isActive("EndScene") || this.scene.isPaused("EndScene")) {
+          this.scene.stop("EndScene");
+        }
+
+        //Reinicia a GameScene (para limpar o modal) e volta pro menu
         this.scene.start("MenuScene");
       });
 
