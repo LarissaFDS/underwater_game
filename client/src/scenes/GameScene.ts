@@ -641,13 +641,18 @@ export class GameScene extends Phaser.Scene {
     if (this.isGameOver) return; //Ignora se o jogo já acabou naturalmente
     this.isGameOver = true;
 
-    //Fecha o puzzle se estiver aberto (Cenário 3) e retoma o tempo da cena principal
+    //Fecha o puzzle se estiver aberto
     this.closePuzzleForFinalGameOver(); 
     
+    //garante que a cena principal seja "despausada". 
+    if (this.scene.isPaused("GameScene")) {
+      this.scene.resume("GameScene");
+    }
+
     //Remove listeners de movimento para travar o submarino
     this.removeGameplaySocketEventListeners();
 
-    //Exibe o modal
+    // Exibe o modal
     this.showPartnerDisconnectedModal();
   }
 
@@ -659,13 +664,14 @@ export class GameScene extends Phaser.Scene {
 
     //Fundo escurecido
     const bg = this.add.rectangle(0, 0, width, height, 0x000000, 0.8)
+      .setScrollFactor(0) //para o botao movimentar
       .setInteractive(); //Bloqueia cliques atrás do modal
 
     //Painel do Modal
     const panel = this.add.rectangle(0, 0, 400, 220, 0x0f172a, 0.95)
       .setStrokeStyle(2, 0xef4444, 1);
 
-    const titleText = this.add.text(0, -50, "Conexão Perdida", {
+    const titleText = this.add.text(0, -50, "Conexão perdida", {
       fontSize: "26px",
       color: "#f8fafc",
       align: "center",
@@ -680,6 +686,7 @@ export class GameScene extends Phaser.Scene {
 
     //Botão Voltar ao Menu
     const btnBg = this.add.rectangle(0, 65, 220, 45, 0x1d4ed8)
+      .setScrollFactor(0) 
       .setInteractive({ useHandCursor: true })
       .on("pointerover", () => btnBg.setFillStyle(0x2563eb))
       .on("pointerout", () => btnBg.setFillStyle(0x1d4ed8))
@@ -701,7 +708,7 @@ export class GameScene extends Phaser.Scene {
         this.scene.start("MenuScene");
       });
 
-    const btnText = this.add.text(0, 65, "Voltar ao Menu", {
+    const btnText = this.add.text(0, 65, "Voltar ao menu", {
       fontSize: "18px",
       color: "#ffffff",
       fontStyle: "bold"
