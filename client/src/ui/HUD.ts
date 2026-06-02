@@ -4,40 +4,24 @@ const OXYGEN_BAR_WIDTH = 200;
 const OXYGEN_BAR_HEIGHT = 16;
 const OXYGEN_BAR_PADDING = 2;
 const HEART_COUNT = 3;
-const HEART_SIZE = 22;
-const HEART_SPACING = 28;
-const O2_ICON_SIZE = 18;
 
 /**
  * Fixed-screen player status display.
  *
  * GameScene creates one HUD for the local player and a scaled HUD for the
  * partner. Both are updated from backend `state:update` snapshots.
- *
- * Hearts are rendered as PNG icons (texture "ui-heart") instead of Phaser
- * circles. An O2 bubble icon (texture "ui-o2-bubble") sits to the left of the
- * oxygen bar as a visual label. The oxygen fill tween is unchanged.
  */
 export class HUD extends Phaser.GameObjects.Container {
   private readonly oxygenFill: Phaser.GameObjects.Rectangle;
-  private readonly hearts: Phaser.GameObjects.Image[];
+  private readonly hearts: Phaser.GameObjects.Arc[];
   private oxygenTween?: Phaser.Tweens.Tween;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y);
+
     scene.add.existing(this);
     this.setScrollFactor(0);
     this.setDepth(1000);
-
-    // ── Oxygen bar ────────────────────────────────────────────────────────────
-    // O2 bubble icon sits to the left of the bar as a label.
-    const o2Icon = scene.add.image(
-      -O2_ICON_SIZE / 2 - 4,
-      OXYGEN_BAR_HEIGHT / 2,
-      "ui-o2-bubble"
-    );
-    o2Icon.setDisplaySize(O2_ICON_SIZE, O2_ICON_SIZE);
-    o2Icon.setOrigin(1, 0.5);
 
     const oxygenBackground = scene.add.rectangle(
       0,
@@ -59,10 +43,9 @@ export class HUD extends Phaser.GameObjects.Container {
     );
     this.oxygenFill.setOrigin(0, 0);
 
-    // ── Heart icons ───────────────────────────────────────────────────────────
     this.hearts = this.createHearts(scene);
 
-    this.add([o2Icon, oxygenBackground, this.oxygenFill, ...this.hearts]);
+    this.add([oxygenBackground, this.oxygenFill, ...this.hearts]);
   }
 
   /**
@@ -84,31 +67,23 @@ export class HUD extends Phaser.GameObjects.Container {
 
   /**
    * Updates the visible heart count for the player represented by this HUD.
-   * Active hearts are fully opaque; inactive hearts are dimmed.
    */
   setHearts(count: number): void {
     const clampedCount = Phaser.Math.Clamp(Math.floor(count), 0, HEART_COUNT);
 
     this.hearts.forEach((heart, index) => {
-      if (index < clampedCount) {
-        heart.setAlpha(1).clearTint();
-      } else {
-        heart.setAlpha(0.25).setTint(0x888888);
-      }
+      const isActive = index < clampedCount;
+      heart.setFillStyle(isActive ? 0xff2d2d : 0x4a1f1f, isActive ? 1 : 0.45);
     });
   }
 
   /**
-   * Creates the fixed number of heart image icons used by the game rules.
+   * Creates the fixed number of heart indicators used by the game rules.
    */
-  private createHearts(scene: Phaser.Scene): Phaser.GameObjects.Image[] {
+  private createHearts(scene: Phaser.Scene): Phaser.GameObjects.Arc[] {
     return Array.from({ length: HEART_COUNT }, (_, index) => {
-      const heart = scene.add.image(
-        HEART_SIZE / 2 + index * HEART_SPACING,
-        34,
-        "ui-heart"
-      );
-      heart.setDisplaySize(HEART_SIZE, HEART_SIZE);
+      const heart = scene.add.circle(12 + index * 28, 34, 9, 0xff2d2d, 1);
+      heart.setStrokeStyle(1, 0xffffff, 0.35);
       return heart;
     });
   }

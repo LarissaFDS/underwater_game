@@ -25,16 +25,6 @@ import { MapGenerationSystem } from "../systems/MapGenerationSystem";
 import { MovementSystem } from "../systems/MovementSystem";
 import { HUD } from "../ui/HUD";
 
-// ── Asset imports (Vite-compatible) ─────────────────────────────────────────
-import submarineUrl from "../assets/submarines/submarine.png";
-import peixePalhaco from "../assets/animals/peixe-palhaco.png";
-import tartaruga from "../assets/animals/tartaruga.png";
-import polvo from "../assets/animals/polvo.png";
-import tubaraoMartelo from "../assets/animals/tubarao-martelo.png";
-import arraia from "../assets/animals/arraia.png";
-import heartUrl from "../assets/ui/heart.png";
-import o2BubbleUrl from "../assets/ui/o2-bubble.png";
-
 /**
  * Data passed by MenuScene when the backend starts a room.
  */
@@ -121,22 +111,6 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Loads all PNG sprite assets used by PlayerSubmarine, Animal and HUD.
-   * Vite resolves each import to a content-hashed URL at build time, so the
-   * raw string paths are never embedded in the bundle directly.
-   */
-  preload(): void {
-    this.load.image("submarine", submarineUrl);
-    this.load.image("animal-peixe-palhaco", peixePalhaco);
-    this.load.image("animal-tartaruga", tartaruga);
-    this.load.image("animal-polvo", polvo);
-    this.load.image("animal-tubarao-martelo", tubaraoMartelo);
-    this.load.image("animal-arraia", arraia);
-    this.load.image("ui-heart", heartUrl);
-    this.load.image("ui-o2-bubble", o2BubbleUrl);
-  }
-
-  /**
    * Resets transient scene state before Phaser creates the world objects.
    */
   init(data: GameSceneData = {}): void {
@@ -178,7 +152,10 @@ export class GameScene extends Phaser.Scene {
       this.partnerTarget.x,
       this.partnerTarget.y,
       {
-        isPartner: true,
+        body: 0x9ca3af,
+        tail: 0x6b7280,
+        cabin: 0xd1d5db,
+        window: 0x111827,
       }
     );
     this.movementSystem = new MovementSystem();
@@ -391,8 +368,11 @@ export class GameScene extends Phaser.Scene {
 
   private createAnimals(): void {
     this.animals = this.getAnimalData().map(
-      (animalData) =>
-        new Animal(this, animalData)
+      (animalData, index) =>
+        new Animal(this, {
+          ...animalData,
+          color: this.getAnimalColor(index),
+        })
     );
   }
 
@@ -400,6 +380,11 @@ export class GameScene extends Phaser.Scene {
     return this.sceneData.animals?.length
       ? this.sceneData.animals
       : FALLBACK_ANIMALS;
+  }
+
+  private getAnimalColor(index: number): number {
+    const colors = [0xf97316, 0x22c55e, 0xa855f7, 0xef4444, 0x38bdf8];
+    return colors[index % colors.length];
   }
 
   /**
@@ -877,20 +862,15 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /**
-   * Marks an animal as discovered: stops its patrol tween, dims it to 0.45
-   * alpha and removes it from proximity tracking. The animal stays visible.
-   */
   private markAnimalDiscovered(animalId: string): void {
-    const animal = this.animals.find(
-      (currentAnimal) => currentAnimal.id === animalId
-    );
+    const animal = this.animals.find((currentAnimal) => currentAnimal.id === animalId);
 
     if (!animal) {
       return;
     }
 
-    animal.markDiscovered();
+    animal.discovered = true;
+    animal.setAlpha(0.45);
     this.triggeredAnimalIds.add(animalId);
     this.animalsInRange.delete(animalId);
   }
