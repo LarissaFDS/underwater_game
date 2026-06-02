@@ -143,6 +143,7 @@ interface ServerToClientEvents {
   "state:update": (payload: StateUpdatePayload) => void;
   "player:gameover": (payload: PlayerGameOverPayload) => void;
   "game:over": (payload: GameOverPayload) => void;
+  "partner:disconnected": () => void;
 }
 
 /**
