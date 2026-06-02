@@ -344,6 +344,19 @@ export class SocketManager {
     return () => socket.off("game:over", handler);
   }
 
+  public onPartnerDisconnected(handler: () => void): () => void {
+    if (!this.socket) return () => {};
+    this.socket.on("partner:disconnected", handler);
+    return () => this.socket?.off("partner:disconnected", handler);
+  }
+  
+  public disconnect(): void {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = undefined;
+    }
+  }
+
   private getServerUrl(): string {
     const configuredUrl = import.meta.env.VITE_SOCKET_URL?.trim();
 

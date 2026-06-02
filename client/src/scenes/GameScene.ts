@@ -137,8 +137,8 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.setBackgroundColor("#0a1628");
     this.mapGenerationSystem = new MapGenerationSystem(this);
     this.playerIds = this.getPlayerIds();
-    // Socket.IO assigns the local id; GameScene uses it to separate local
-    // player updates from the partner's remote representation.
+    //Socket.IO assigns the local id; GameScene uses it to separate local
+    //player updates from the partner's remote representation.
     this.localPlayerId = socketManager.currentSocket?.id;
 
     const mapSeed = this.getMapSeed();
@@ -148,8 +148,8 @@ export class GameScene extends Phaser.Scene {
     this.createAnimals();
 
     this.player = new PlayerSubmarine(this, MAP_WIDTH / 2, MAP_HEIGHT / 2);
-    // The partner submarine is visual-only on this client. It is positioned by
-    // backend updates rather than by local input.
+    //The partner submarine is visual-only on this client. It is positioned by
+    //backend updates rather than by local input.
     this.partner = new PlayerSubmarine(
       this,
       this.partnerTarget.x,
@@ -184,8 +184,8 @@ export class GameScene extends Phaser.Scene {
       socketManager.onPlayerMoved((payload: PlayerMovedPayload) => {
         const currentSocketId = socketManager.currentSocket?.id;
 
-        // Ignore echoed local movement so the local submarine stays controlled
-        // by immediate input instead of network interpolation.
+        //Ignore echoed local movement so the local submarine stays controlled
+        //by immediate input instead of network interpolation.
         if (
           payload.id === this.localPlayerId ||
           payload.id === currentSocketId
@@ -212,8 +212,8 @@ export class GameScene extends Phaser.Scene {
         this.triggeredAnimalIds.add(payload.animalId);
         this.animalsInRange.clear();
         this.releasePuzzleLockOnShutdown();
-        // PuzzleScene is launched as an overlay and GameScene pauses so local
-        // movement does not continue while the player answers the minigame.
+        //PuzzleScene is launched as an overlay and GameScene pauses so local
+        //movement does not continue while the player answers the minigame.
         this.scene.launch("PuzzleScene", payload);
         this.pauseGameSceneIfActive();
       }),
@@ -225,6 +225,9 @@ export class GameScene extends Phaser.Scene {
       }),
       socketManager.onGameOver((payload: GameOverPayload) => {
         this.handleGameOver(payload);
+      }),
+      socketManager.onPartnerDisconnected(() => {
+        this.handlePartnerDisconnected();
       })
     );
     this.unsubscribeScoreResult = scoreSocketManager.onGameResult(
@@ -234,7 +237,7 @@ export class GameScene extends Phaser.Scene {
     );
 
     if (socketManager.currentState) {
-      // A scene may start after the backend has already sent a snapshot.
+      //A scene may start after the backend has already sent a snapshot.
       this.applyStateUpdate(socketManager.currentState);
     }
 
@@ -261,8 +264,8 @@ export class GameScene extends Phaser.Scene {
         delta
       );
 
-      // Only the local submarine emits local actions. The partner is updated
-      // from server events and never sends input from this client.
+      //Only the local submarine emits local actions. The partner is updated
+      //from server events and never sends input from this client.
       this.player.x = Phaser.Math.Clamp(this.player.x, 0, MAP_WIDTH);
       this.player.y = Phaser.Math.Clamp(this.player.y, 0, MAP_HEIGHT);
       this.emitPlayerPosition(time);
@@ -413,9 +416,9 @@ export class GameScene extends Phaser.Scene {
 
       this.animalsInRange.add(animal.id);
       this.setPendingPuzzle(animal.id);
-      // The backend decides whether proximity should open a puzzle; the
-      // frontend only reports that the local player reached an animal radius.
-      // Debug
+      //The backend decides whether proximity should open a puzzle; the
+      //frontend only reports that the local player reached an animal radius.
+      //Debug
       console.log("Emitting animal:approach", animal.id);
       socketManager.emitAnimalApproach({ animalId: animal.id });
     });
@@ -442,8 +445,8 @@ export class GameScene extends Phaser.Scene {
 
     this.lastObstacleHitTime = time;
     this.flashSubmarine(this.player);
-    // Obstacle damage is emitted as a local action; O2/hearts changes still
-    // come back through backend state events.
+    //Obstacle damage is emitted as a local action; O2/hearts changes still
+    //come back through backend state events.
     socketManager.emitPlayerHit({ obstacleType: obstacle.obstacleType });
   }
 
@@ -489,8 +492,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Position emission is throttled so normal pointer movement does not flood
-    // the Socket.IO channel.
+    //Position emission is throttled so normal pointer movement does not flood
+    //the Socket.IO channel.
     socketManager.emitPlayerMove({
       x: this.player.x,
       y: this.player.y,
@@ -502,8 +505,8 @@ export class GameScene extends Phaser.Scene {
    * Smooths the remote partner toward the latest backend-provided target.
    */
   private updatePartnerPosition(delta: number): void {
-    // Remote movement is interpolated toward the latest backend target to hide
-    // network update gaps without taking ownership of partner control.
+    //Remote movement is interpolated toward the latest backend target to hide
+    //network update gaps without taking ownership of partner control.
     const lerpFactor = Phaser.Math.Clamp(delta / 120, 0.08, 0.22);
     const previousX = this.partner.x;
 
@@ -559,8 +562,8 @@ export class GameScene extends Phaser.Scene {
   private applyStateUpdate(payload: StateUpdatePayload): void {
     const localPlayerId = this.getLocalPlayerId();
 
-    // `state:update` is the source of truth for player resources. It updates
-    // the local HUD and the partner HUD separately based on the socket id.
+    //`state:update` is the source of truth for player resources. It updates
+    //the local HUD and the partner HUD separately based on the socket id.
     Object.entries(payload).forEach(([id, playerState]) => {
       const playerId = playerState.id || id;
       const isLocalPlayer =
@@ -589,8 +592,8 @@ export class GameScene extends Phaser.Scene {
    * Handles a single-player oxygen/heart loss flow without ending the match.
    */
   private handlePlayerGameOver(payload: PlayerGameOverPayload): void {
-    // Player-level game over can respawn one submarine without ending the
-    // entire match. The affected socket id decides which visual object moves.
+    //Player-level game over can respawn one submarine without ending the
+    //entire match. The affected socket id decides which visual object moves.
     this.applyStateUpdate(payload.state ?? payload.players ?? {});
 
     const affectedPlayerId = this.getPayloadPlayerId(payload);
@@ -632,6 +635,70 @@ export class GameScene extends Phaser.Scene {
     this.closePuzzleForFinalGameOver();
     this.removeGameplaySocketEventListeners();
     this.pauseGameSceneIfActive();
+  }
+
+  private handlePartnerDisconnected(): void {
+    if (this.isGameOver) return; //Ignora se o jogo já acabou naturalmente
+    this.isGameOver = true;
+
+    //Fecha o puzzle se estiver aberto (Cenário 3) e retoma o tempo da cena principal
+    this.closePuzzleForFinalGameOver(); 
+    
+    //Remove listeners de movimento para travar o submarino
+    this.removeGameplaySocketEventListeners();
+
+    //Exibe o modal
+    this.showPartnerDisconnectedModal();
+  }
+
+  private showPartnerDisconnectedModal(): void {
+    const { width, height } = this.scale;
+    const overlay = this.add.container(width / 2, height / 2);
+    overlay.setScrollFactor(0);
+    overlay.setDepth(2000); //Fica acima de TUDO, inclusive do DepthOverlay
+
+    //Fundo escurecido
+    const bg = this.add.rectangle(0, 0, width, height, 0x000000, 0.8)
+      .setInteractive(); //Bloqueia cliques atrás do modal
+
+    //Painel do Modal
+    const panel = this.add.rectangle(0, 0, 400, 220, 0x0f172a, 0.95)
+      .setStrokeStyle(2, 0xef4444, 1);
+
+    const titleText = this.add.text(0, -50, "Conexão Perdida", {
+      fontSize: "26px",
+      color: "#f8fafc",
+      align: "center",
+    }).setOrigin(0.5);
+
+    const messageText = this.add.text(0, 0, "O seu parceiro desconectou\ne a sala foi encerrada.", {
+      fontSize: "18px",
+      color: "#fca5a5",
+      align: "center",
+      wordWrap: { width: 360 }
+    }).setOrigin(0.5);
+
+    //Botão Voltar ao Menu
+    const btnBg = this.add.rectangle(0, 65, 220, 45, 0x1d4ed8)
+      .setInteractive({ useHandCursor: true })
+      .on("pointerover", () => btnBg.setFillStyle(0x2563eb))
+      .on("pointerout", () => btnBg.setFillStyle(0x1d4ed8))
+      .on("pointerdown", () => {
+        //Desconecta o próprio socket ativamente para garantir que a sala seja limpa 
+        //imediatamente no backend (antes mesmo dos 10s)
+        socketManager.disconnect(); 
+        
+        //Volta para o Menu limpo
+        this.scene.start("MenuScene");
+      });
+
+    const btnText = this.add.text(0, 65, "Voltar ao Menu", {
+      fontSize: "18px",
+      color: "#ffffff",
+      fontStyle: "bold"
+    }).setOrigin(0.5);
+
+    overlay.add([bg, panel, titleText, messageText, btnBg, btnText]);
   }
 
   /**
