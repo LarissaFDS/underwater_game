@@ -5,18 +5,6 @@ import cors from 'cors';
 import { GameRoom } from '../game/GameRoom';
 import { SocketEvents } from '../socket/events';
 
-//─── Tipos internos de validação de token ───────────────────────────────────
-interface TokenValidationResult {
-  valid: boolean;
-  nickname?: string;
-}
-
-interface TokenCacheEntry {
-  nickname: string;
-  validatedAt: number;
-}
-
-//─── GameServer ──────────────────────────────────────────────────────────────
 export class GameServer {
   private readonly app: Application;
   private readonly server: http.Server;
@@ -24,40 +12,34 @@ export class GameServer {
   private readonly room: GameRoom;
   private readonly roomName: string;
   private readonly serviceRoomName: string;
-  private lastCorrectGuesses = new Map<string, string>();
+  private lastCorrectGuesses = new Map<string, string>(); //Guarda: animalId -> socket.id de quem acertou
   private readonly playerSocketsByClientInstanceId = new Map<string, string>();
   private readonly puzzleApiUrl: string;
-  private readonly authServiceUrl: string;
   private readonly corsOrigin: string | string[];
   private readonly instanceId: string;
-  private roomDestructionTimeout: NodeJS.Timeout | null = null;
-
-  //Cache local de validações de token para reduzir chamadas HTTP ao auth-service.
-  //Entradas expiram após TOKEN_CACHE_TTL_MS milissegundos.
-  private readonly tokenCache: Map<string, TokenCacheEntry> = new Map();
-  private static readonly TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; //5 minutos
+  private roomDestructionTimeout: NodeJS.Timeout | null = null; //para destruição da sala dps de 10s
 
   constructor() {
-    this.app            = express();
-    this.server         = http.createServer(this.app);
-    this.room           = new GameRoom(2);
-    this.roomName       = 'ocean_room';
+    this.app = express();
+    this.server = http.createServer(this.app);
+    this.room = new GameRoom(2);
+    this.roomName = 'ocean_room';
     this.serviceRoomName = 'internal_services';
-    this.puzzleApiUrl   = process.env.PUZZLE_API_URL  || 'http://localhost:3002';
-    this.authServiceUrl = process.env.AUTH_SERVICE_URL || 'http://localhost:3004';
-    this.corsOrigin     = this.resolveCorsOrigin();
-    this.instanceId     =
+    this.puzzleApiUrl = process.env.PUZZLE_API_URL || 'http://localhost:3002';
+    this.corsOrigin = this.resolveCorsOrigin();
+    this.instanceId =
       process.env.RENDER_INSTANCE_ID ||
-      process.env.RENDER_SERVICE_ID  ||
+      process.env.RENDER_SERVICE_ID ||
       `pid-${process.pid}`;
 
+    
     this.io = new Server(this.server, {
       cors: { origin: this.corsOrigin, methods: ['GET', 'POST'] },
       transports: ['websocket', 'polling'],
-      pingInterval: 15_000,
+      pingInterval: 15_000,   //default is 25s — too close to Render's 30s idle limit
       pingTimeout:  10_000,
     });
-
+    
     this.setupMiddlewares();
     this.setupHttpRoutes();
     this.setupSocketHandlers();
@@ -65,7 +47,7 @@ export class GameServer {
 
   private lastGameOverPayload: object | null = null;
 
-  //─── HTTP ──────────────────────────────────────────────────────────────────
+  //HTTP
   private setupMiddlewares(): void {
     this.app.use(cors({ origin: this.corsOrigin }));
     this.app.use(express.json());
@@ -79,15 +61,17 @@ export class GameServer {
 
   private resolveCorsOrigin(): string | string[] {
     const rawOrigins =
-      process.env.CORS_ORIGIN   ||
-      process.env.CORS_ORIGINS  ||
+      process.env.CORS_ORIGIN ||
+      process.env.CORS_ORIGINS ||
       process.env.FRONTEND_ORIGIN;
 
-    if (!rawOrigins) return '*';
+    if (!rawOrigins) {
+      return '*';
+    }
 
     const origins = rawOrigins
       .split(',')
-      .map((o) => o.trim())
+      .map((origin) => origin.trim())
       .filter(Boolean);
 
     return origins.length === 1 ? origins[0] : origins;
@@ -100,15 +84,18 @@ export class GameServer {
   }
 
   private formatHeader(value: string | string[] | undefined): string {
-    if (Array.isArray(value)) return value.join(', ');
+    if (Array.isArray(value)) {
+      return value.join(', ');
+    }
+
     return value ?? 'n/a';
   }
 
-  //─── Catálogo ─────────────────────────────────────────────────────────────
+  //Catalog
   private async loadCatalog(): Promise<void> {
     try {
       const response = await fetch(`${this.puzzleApiUrl}/api/animals`);
-      const animals  = await response.json();
+      const animals = await response.json();
       this.room.setCatalog(animals);
       console.log(`Catálogo carregado com ${animals.length} animais.`);
     } catch (error) {
@@ -116,34 +103,7 @@ export class GameServer {
     }
   }
 
-  //─── Validação de token (com cache) ───────────────────────────────────────
-  private async validateToken(token: string): Promise<TokenValidationResult> {
-    const cached = this.tokenCache.get(token);
-    if (cached && Date.now() - cached.validatedAt < GameServer.TOKEN_CACHE_TTL_MS) {
-      return { valid: true, nickname: cached.nickname };
-    }
-
-    try {
-      const res = await fetch(`${this.authServiceUrl}/api/validate/${token}`);
-      if (!res.ok) return { valid: false };
-
-      const data = await res.json() as TokenValidationResult;
-
-      if (data.valid && data.nickname) {
-        this.tokenCache.set(token, {
-          nickname: data.nickname,
-          validatedAt: Date.now(),
-        });
-      }
-
-      return data;
-    } catch (err) {
-      console.error('[GameServer] Falha ao contatar auth-service:', err);
-      return { valid: false };
-    }
-  }
-
-  //─── Game Over ────────────────────────────────────────────────────────────
+  //Game Over
   private emitGameOver(
     winnerId: string | null,
     reason: 'elimination' | 'exploration',
@@ -180,8 +140,9 @@ export class GameServer {
     console.log(`Morte registrada para ${playerId}. deathCount=${player.deathCount}`);
 
     if (player.deathCount >= 2) {
-      const winnerId =
-        this.room.getPlayerIds().find((id) => id !== playerId) ?? null;
+      const winnerId = this.room
+        .getPlayerIds()
+        .find((id) => id !== playerId) ?? null;
 
       this.emitGameOver(
         winnerId,
@@ -201,54 +162,13 @@ export class GameServer {
   private checkAllAnimalsDiscovered(): void {
     if (!this.room.allAnimalsDiscovered()) return;
 
+    //Ganha quem tiver mais animais descobertos; empate → null.
     const winnerId = this.room.getLeadingPlayerId();
     this.emitGameOver(winnerId, 'exploration');
   }
 
-  //─── Socket handlers ──────────────────────────────────────────────────────
+  //Socket handlers
   private setupSocketHandlers(): void {
-    //── Middleware de autenticação ─────────────────────────────────────────
-    //Executado para cada conexão antes do handler 'connection'.
-    //Conexões de microsserviços (clientType === 'service') não precisam de token.
-    //Conexões de jogadores devem apresentar um token válido do auth-service.
-    this.io.use(async (socket, next) => {
-      const { clientType, token } = socket.handshake.auth as {
-        clientType?: string;
-        token?: string;
-      };
-
-      //Microsserviços internos (score-service etc.) não passam por validação
-      if (clientType === 'service') {
-        return next();
-      }
-
-      if (!token) {
-        return next(
-          new Error('Token de autenticação ausente. Faça login antes de conectar.')
-        );
-      }
-
-      const result = await this.validateToken(token);
-
-      if (!result.valid || !result.nickname) {
-        return next(
-          new Error('Token inválido ou expirado. Faça login novamente.')
-        );
-      }
-
-      //Nickname validado fica disponível para o handler de conexão
-      socket.data.nickname = result.nickname;
-      next();
-    });
-
-    //── Handler de conexão ────────────────────────────────────────────────
-    this.io.engine.on('connection_error', (error) => {
-      const origin = this.formatHeader(error.req?.headers.origin);
-      console.error(
-        `[GameServer] connect_error origin=${origin} code=${error.code} message=${error.message}`
-      );
-    });
-
     this.io.on('connection', (socket: Socket) => {
       const { clientType, serviceName, clientInstanceId } = socket.handshake
         .auth as {
@@ -256,45 +176,34 @@ export class GameServer {
         serviceName?: string;
         clientInstanceId?: string;
       };
-
-      //O nickname já foi validado e injetado pelo middleware acima.
-      //O fallback 'Jogador' é apenas um guarda de tipo, nunca deveria ocorrer.
-      const nickname = (socket.data.nickname as string | undefined) ?? 'Jogador';
-
-      const origin         = this.formatHeader(socket.handshake.headers.origin);
-      const playersBefore  = this.room.getPlayerIds();
+      const origin = this.formatHeader(socket.handshake.headers.origin);
+      const playersBefore = this.room.getPlayerIds();
       const playerCountBefore = this.room.playerCount;
 
       console.log(
         `[GameServer] connection instance=${this.instanceId} socket=${socket.id} origin=${origin} auth=${JSON.stringify(socket.handshake.auth)}`
       );
 
-      //── Conexão de microsserviço ─────────────────────────────────────────
       if (clientType === 'service') {
-        console.log(
-          `[GameServer] service connected socket=${socket.id} serviceName=${serviceName ?? 'unknown'}`
-        );
+        console.log(`[GameServer] service connected socket=${socket.id} serviceName=${serviceName ?? 'unknown'}`);
         socket.join(this.serviceRoomName);
-
+      
         if (this.lastGameOverPayload) {
           socket.emit(SocketEvents.GAME_OVER, this.lastGameOverPayload);
           console.log('[GameServer] replayed last game:over to reconnected service');
         }
-
+      
         socket.on('service:getLastGameOver', () => {
           if (this.lastGameOverPayload) {
             socket.emit(SocketEvents.GAME_OVER, this.lastGameOverPayload);
           }
         });
-
+      
         return;
       }
 
-      //── Conexão de jogador ───────────────────────────────────────────────
       console.log(
-        `[GameServer] player connecting instance=${this.instanceId} socket=${socket.id}` +
-        ` nickname=${nickname} clientInstanceId=${clientInstanceId ?? 'n/a'}` +
-        ` playerCountBefore=${playerCountBefore} playersBefore=${playersBefore.join(',') || 'none'}`
+        `[GameServer] player connecting instance=${this.instanceId} socket=${socket.id} clientInstanceId=${clientInstanceId ?? 'n/a'} playerCountBefore=${playerCountBefore} playersBefore=${playersBefore.join(',') || 'none'}`
       );
 
       if (clientInstanceId) {
@@ -302,10 +211,11 @@ export class GameServer {
         this.replaceDuplicatePlayerSocket(clientInstanceId, socket.id);
       }
 
+      //Sockets de microsserviços e conexões duplicadas da mesma aba não entram
+      //no matchmaking; apenas jogadores reais mantidos em GameRoom contam.
       if (this.room.playerCount >= this.room.maxPlayers) {
         console.warn(
-          `[GameServer] room:full instance=${this.instanceId} socket=${socket.id}` +
-          ` playerCount=${this.room.playerCount}`
+          `[GameServer] room:full instance=${this.instanceId} socket=${socket.id} clientInstanceId=${clientInstanceId ?? 'n/a'} playerCount=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
         );
         socket.emit(SocketEvents.ROOM_FULL, { error: 'A sala já está cheia.' });
         socket.disconnect();
@@ -313,39 +223,21 @@ export class GameServer {
       }
 
       socket.join(this.roomName);
-      this.room.addPlayer(socket.id, nickname);
-
+      this.room.addPlayer(socket.id);
       if (clientInstanceId) {
         this.playerSocketsByClientInstanceId.set(clientInstanceId, socket.id);
       }
-
       console.log(
-        `[GameServer] player added instance=${this.instanceId} socket=${socket.id}` +
-        ` nickname=${nickname} playerCountAfter=${this.room.playerCount}`
+        `[GameServer] player added instance=${this.instanceId} socket=${socket.id} clientInstanceId=${clientInstanceId ?? 'n/a'} playerCountBefore=${playerCountBefore} playerCountAfter=${this.room.playerCount} players=${this.room.getPlayerIds().join(',') || 'none'}`
       );
 
-      //── room:joined — confirma entrada na sala com apelido resolvido ─────
-      socket.emit(SocketEvents.ROOM_JOINED, {
-        playerId: socket.id,
-        nickname,
-      });
-
-      //── Inicia a partida quando a sala está cheia ────────────────────────
       if (this.room.playerCount === this.room.maxPlayers) {
         this.loadCatalog().then(() => {
           const seed = this.room.generateSeed();
           this.room.initializeAnimals();
           this.lastGameOverPayload = null;
-
-          this.io.to(this.roomName).emit(SocketEvents.GAME_START, {
-            seed,
-            players:   this.room.getPlayerIds(),
-            nicknames: this.room.getNicknames(), //{ socketId: nickname }
-          });
-
-          this.io
-            .to(this.roomName)
-            .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+          this.io.to(this.roomName).emit(SocketEvents.GAME_START, { seed, players: this.room.getPlayerIds() });
+          this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
         });
       }
 
@@ -353,10 +245,7 @@ export class GameServer {
     });
   }
 
-  private getEliminationReason(player: {
-    oxygen: number;
-    hearts: number;
-  }): 'oxygen' | 'hearts' {
+  private getEliminationReason(player: { oxygen: number; hearts: number }): 'oxygen' | 'hearts' {
     return player.oxygen <= 0 ? 'oxygen' : 'hearts';
   }
 
@@ -364,14 +253,16 @@ export class GameServer {
     clientInstanceId: string,
     nextSocketId: string
   ): void {
-    const previousSocketId =
-      this.playerSocketsByClientInstanceId.get(clientInstanceId);
+    const previousSocketId = this.playerSocketsByClientInstanceId.get(
+      clientInstanceId
+    );
 
-    if (!previousSocketId || previousSocketId === nextSocketId) return;
+    if (!previousSocketId || previousSocketId === nextSocketId) {
+      return;
+    }
 
     console.log(
-      `[GameServer] replacing duplicate clientInstanceId=${clientInstanceId}` +
-      ` previousSocket=${previousSocketId} nextSocket=${nextSocketId}`
+      `[GameServer] replacing duplicate client instance=${this.instanceId} clientInstanceId=${clientInstanceId} previousSocket=${previousSocketId} nextSocket=${nextSocketId}`
     );
 
     this.room.removePlayer(previousSocketId);
@@ -396,13 +287,14 @@ export class GameServer {
     socket.on(SocketEvents.ANIMAL_APPROACH, async (data: { animalId: string }) => {
       if (this.room.getActivePuzzleAnimalId() !== null) return;
 
-      const { animalId }  = data;
-      const roomAnimal    = this.room.getAnimal(animalId);
-      const catalogData   = this.room.findCatalogAnimal(animalId);
+      const { animalId } = data;
+      const roomAnimal = this.room.getAnimal(animalId);
+      const catalogData = this.room.findCatalogAnimal(animalId);
 
       if (!roomAnimal || !catalogData || roomAnimal.discovered) return;
 
       this.room.startPuzzle(animalId);
+      //Registra início do timer no AnimalState
       roomAnimal.startPuzzle();
 
       try {
@@ -436,26 +328,22 @@ export class GameServer {
         return;
       }
 
-      animal.discovered  = true;
-      const winnerSocketId =
-        this.lastCorrectGuesses.get(activeAnimalId) || socket.id;
+      animal.discovered = true;
+      const winnerSocketId = this.lastCorrectGuesses.get(activeAnimalId) || socket.id;
       animal.discoveredBy = winnerSocketId;
       this.lastCorrectGuesses.delete(activeAnimalId);
       this.room.clearActivePuzzle();
 
       console.log(
-        `[GameServer] animal discovered animalId=${activeAnimalId}` +
-        ` discoveredBy=${winnerSocketId}` +
-        ` discoveredCount=${this.room.getDiscoveredAnimalCount()}` +
-        ` totalAnimals=${this.room.getAnimalCount()}`
+        `[GameServer] animal discovered animalId=${activeAnimalId} discoveredBy=${socket.id} discoveredCount=${this.room.getDiscoveredAnimalCount()} totalAnimals=${this.room.getAnimalCount()}`
       );
 
       this.io.to(this.roomName).emit(SocketEvents.PUZZLE_RESULT, {
         animalId: activeAnimalId,
-        correct:    true,
-        positions:  [],
-        letter:     '',
-        completed:  true,
+        correct: true,
+        positions: [],
+        letter: '',
+        completed: true,
         discovered: true,
       });
 
@@ -467,79 +355,69 @@ export class GameServer {
       if (!player) return;
 
       player.hearts -= 1;
-      this.io
-        .to(this.roomName)
-        .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+      this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
       this.checkPlayerDeath(socket.id);
     });
 
-    socket.on(
-      SocketEvents.PUZZLE_GUESS,
-      async (data: { animalId: string; letter: string }) => {
-        const player = this.room.getPlayer(socket.id);
-        if (!player || !data.letter) return;
+    socket.on(SocketEvents.PUZZLE_GUESS, async (data: { animalId: string; letter: string }) => {
+      const player = this.room.getPlayer(socket.id);
+      if (!player || !data.letter) return;
 
-        try {
-          const response = await fetch(`${this.puzzleApiUrl}/api/puzzle/guess`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-          });
-          const result = await response.json();
+      try {
+        const response = await fetch(`${this.puzzleApiUrl}/api/puzzle/guess`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        const result = await response.json();
 
-          if (!result.correct) {
-            player.oxygen -= 10;
-            const animal = this.room.getAnimal(data.animalId);
-            animal?.registerWrongGuess();
-          } else {
-            this.lastCorrectGuesses.set(data.animalId, socket.id);
-          }
-
-          this.io.to(this.roomName).emit(SocketEvents.PUZZLE_RESULT, {
-            animalId:  data.animalId,
-            correct:   result.correct,
-            positions: result.positions,
-            letter:    data.letter.toLowerCase(),
-          });
-
-          this.io
-            .to(this.roomName)
-            .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
-          this.checkPlayerDeath(socket.id);
-        } catch (error) {
-          console.error('Erro ao validar chute:', error);
+        if (!result.correct) {
+          player.oxygen -= 10;
+          //Registra erro no AnimalState para o score
+          const animal = this.room.getAnimal(data.animalId);
+          animal?.registerWrongGuess();
         }
-      }
-    );
-
-    socket.on(
-      SocketEvents.PUZZLE_HINT,
-      async (data: { animalId: string; hintIndex: number }) => {
-        const player = this.room.getPlayer(socket.id);
-        if (!player) return;
-
-        try {
-          const response = await fetch(`${this.puzzleApiUrl}/api/puzzle/hint`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-          });
-          const result = await response.json();
-
-          if (result.hint && result.hint !== 'Sem mais dicas.') {
-            player.oxygen -= 5;
-          }
-
-          socket.emit(SocketEvents.PUZZLE_HINT, { hint: result.hint });
-          this.io
-            .to(this.roomName)
-            .emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
-          this.checkPlayerDeath(socket.id);
-        } catch (error) {
-          console.error('Erro ao solicitar dica:', error);
+        else { //registra que foi o uktimoa a acertar a letra (descoriu o animal)
+          this.lastCorrectGuesses.set(data.animalId, socket.id);
         }
+
+        this.io.to(this.roomName).emit(SocketEvents.PUZZLE_RESULT, {
+          animalId: data.animalId,
+          correct: result.correct,
+          positions: result.positions,
+          letter: data.letter.toLowerCase(),
+        });
+
+        this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+        this.checkPlayerDeath(socket.id);
+      } catch (error) {
+        console.error('Erro ao validar chute:', error);
       }
-    );
+    });
+
+    socket.on(SocketEvents.PUZZLE_HINT, async (data: { animalId: string; hintIndex: number }) => {
+      const player = this.room.getPlayer(socket.id);
+      if (!player) return;
+
+      try {
+        const response = await fetch(`${this.puzzleApiUrl}/api/puzzle/hint`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        const result = await response.json();
+
+        if (result.hint && result.hint !== 'Sem mais dicas.') {
+          player.oxygen -= 5;
+        }
+
+        socket.emit(SocketEvents.PUZZLE_HINT, { hint: result.hint });
+        this.io.to(this.roomName).emit(SocketEvents.STATE_UPDATE, this.room.getPlayers());
+        this.checkPlayerDeath(socket.id);
+      } catch (error) {
+        console.error('Erro ao solicitar dica:', error);
+      }
+    });
 
     socket.on(SocketEvents.GAME_RESTART, () => {
       if (this.room.playerCount < this.room.maxPlayers) return;
@@ -549,8 +427,7 @@ export class GameServer {
 
       this.io.to(this.roomName).emit(SocketEvents.GAME_START, {
         seed,
-        players:   this.room.getPlayerIds(),
-        nicknames: this.room.getNicknames(),
+        players: this.room.getPlayerIds(),
       });
 
       this.io
@@ -563,41 +440,47 @@ export class GameServer {
     socket.on('disconnect', () => {
       const playerCountBefore = this.room.playerCount;
       console.log(
-        `[GameServer] disconnected instance=${this.instanceId} socket=${socket.id}` +
-        ` clientInstanceId=${socket.data.clientInstanceId ?? 'n/a'}` +
-        ` playerCountBefore=${playerCountBefore}`
+        `[GameServer] disconnected instance=${this.instanceId} socket=${socket.id} clientInstanceId=${socket.data.clientInstanceId ?? 'n/a'} playerCountBefore=${playerCountBefore} playersBefore=${this.room.getPlayerIds().join(',') || 'none'}`
       );
 
       this.room.removePlayer(socket.id);
       this.removePlayerSocketMapping(socket);
 
+      //CENÁRIO 1: O último (ou único) jogador saiu. Destruir imediatamente.
       if (this.room.playerCount === 0) {
         this.room.clearAnimals();
         this.room.clearActivePuzzle();
-
+        
+        //Se havia um timer de destruição rodando, limpa para evitar memory leak
         if (this.roomDestructionTimeout) {
           clearTimeout(this.roomDestructionTimeout);
           this.roomDestructionTimeout = null;
         }
         console.log('[GameServer] Sala vazia. Estado limpo.');
-      } else if (this.room.playerCount === 1) {
-        console.log(
-          '[GameServer] Parceiro desconectou. Notificando jogador restante e iniciando timer de 10s.'
-        );
-
+      } 
+      //CENÁRIO 2 e 4: Um jogador saiu, mas o outro ainda está na sala.
+      else if (this.room.playerCount === 1) {
+        console.log('[GameServer] Parceiro desconectou. Notificando jogador restante e iniciando timer de 10s.');
+        
+        //Emite o evento para o jogador que ficou
         this.io.to(this.roomName).emit('partner:disconnected');
 
+        //Agenda a destruição da sala após 10 segundos
         this.roomDestructionTimeout = setTimeout(() => {
           console.log('[GameServer] Timeout de 10s atingido. Destruindo sala.');
           this.room.clearAnimals();
           this.room.clearActivePuzzle();
+          
+          //Opcional, dependendo da sua GameRoom: this.room.reset();
+          
+          //Desconecta à força qualquer socket que tenha ficado "preso" na sala
           this.io.in(this.roomName).disconnectSockets(true);
           this.roomDestructionTimeout = null;
         }, 10000);
       }
     });
   }
-
+  
   private removePlayerSocketMapping(socket: Socket): void {
     const clientInstanceId = socket.data.clientInstanceId;
 
@@ -609,16 +492,12 @@ export class GameServer {
     }
   }
 
-  //─── Entry point ──────────────────────────────────────────────────────────
-
+  //Entry point
   public listen(port: number): void {
     this.server.listen(port, '0.0.0.0', () => {
       console.log(`🎮 Game Service (Socket) rodando na porta ${port}`);
       console.log(
-        `[GameServer] instance=${this.instanceId}` +
-        ` corsOrigin=${this.formatCorsOrigin()}` +
-        ` transports=websocket,polling` +
-        ` authServiceUrl=${this.authServiceUrl}`
+        `[GameServer] instance=${this.instanceId} corsOrigin=${this.formatCorsOrigin()} transports=websocket,polling`
       );
     });
   }
