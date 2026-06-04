@@ -1,0 +1,13 @@
+{
+    "name": "ocean-tests",
+    "version": "1.0.0",
+    "description": "Scripts de teste de integração do Ocean Puzzle Game",
+    "main": "test-flow.js",
+    "scripts": {
+      "test": "node test-flow.js",
+      "test:rest": "bash test-rest.sh"
+    },
+    "dependencies": {
+      "socket.io-client": "^4.7.5"
+    }
+  }
