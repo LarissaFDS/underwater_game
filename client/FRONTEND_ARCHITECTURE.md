@@ -19,6 +19,7 @@ Ele roda separado do backend e se comunica com ele via Socket.IO. O frontend nã
 - `Animal`: componente/entidade de interação. Possui raio de detecção usado para emitir aproximação.
 - `MovementSystem`: componente de lógica de movimento local. Mantém velocidade, direção visual e cálculo por delta fora da `GameScene`.
 - `MapGenerationSystem`: componente de geração do mapa. Usa seed para criar grade, obstáculos e decorações.
+- `DepthEffectsSystem`: componente visual de atmosfera. Cria overlay de profundidade, bolhas de água e vinheta fixa de câmera sem alterar regras de jogo ou comunicação.
 
 ## 2.1. Sprites e HUD do gameplay
 
@@ -41,6 +42,18 @@ Os sprites PNG do gameplay ficam em `client/src/assets` e são centralizados em 
 `HUD` continua fixo na câmera com `setScrollFactor(0)`. Os corações passaram a usar `ui/heart.png`; acima da barra de O2, o HUD exibe `ui/o2-bubble.png` alinhado ao início da barra e o texto "Oxigênio" à direita. O cálculo de O2, vidas, pontuação e eventos recebidos permanece igual.
 
 Essas mudanças são exclusivamente de frontend em `client/`; não alteram backend, microserviços, contratos Socket.IO, DTOs, eventos ou serviços.
+
+## 2.2. Efeitos visuais de profundidade
+
+`DepthEffectsSystem`, em `client/src/systems/DepthEffectsSystem.ts`, concentra os efeitos visuais de profundidade do mapa. A `GameScene` apenas instancia o sistema depois da geração do mapa e o destrói no shutdown da cena.
+
+O overlay de profundidade é desenhado com `Phaser.GameObjects.Graphics` em várias faixas suaves no espaço do mundo, usando `setScrollFactor(1)` para acompanhar as coordenadas do mapa. Isso cria escurecimento progressivo ao descer sem uma linha de corte visível.
+
+As bolhas de água usam emissores leves de partículas do Phaser, com frequência baixa por região do mapa, limite de partículas vivas e textura gerada uma única vez. Elas também usam `setScrollFactor(1)`, pois são decoração ligada ao mundo e devem se mover junto com o mapa quando a câmera acompanha o submarino.
+
+A vinheta é desenhada como efeito fixo de tela com `setScrollFactor(0)`, permanecendo alinhada às bordas do canvas. Ela fica abaixo da HUD e dos overlays principais para não bloquear `HUD`, `PuzzleScene` ou `EndScene`.
+
+Esses efeitos são exclusivamente visuais no frontend. Eles não alteram backend, microserviços, `SocketManager`, `ScoreSocketManager`, eventos Socket.IO, regras de puzzle, O2, vidas, pontuação ou fim de jogo.
 
 ## 3. Comunicação com backend
 

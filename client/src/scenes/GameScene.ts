@@ -1,10 +1,6 @@
 import Phaser from "phaser";
 import { GAME_ASSETS, SPRITE_KEYS } from "../assets/assetsMap";
-import {
-  DEPTH_OVERLAY_MAX_ALPHA,
-  MAP_HEIGHT,
-  MAP_WIDTH,
-} from "../data/mapConfig";
+import { MAP_HEIGHT, MAP_WIDTH } from "../data/mapConfig";
 import { Animal } from "../entities/Animal";
 import { PlayerSubmarine } from "../entities/PlayerSubmarine";
 import {
@@ -22,6 +18,7 @@ import {
   scoreSocketManager,
   type GameResultPayload,
 } from "../socket/ScoreSocketManager";
+import { DepthEffectsSystem } from "../systems/DepthEffectsSystem";
 import { MapGenerationSystem } from "../systems/MapGenerationSystem";
 import { MovementSystem } from "../systems/MovementSystem";
 import { HUD } from "../ui/HUD";
@@ -58,8 +55,8 @@ export class GameScene extends Phaser.Scene {
   private partner!: PlayerSubmarine;
   private movementSystem!: MovementSystem;
   private mapGenerationSystem!: MapGenerationSystem;
+  private depthEffectsSystem?: DepthEffectsSystem;
   private animals: Animal[] = [];
-  private depthOverlay!: Phaser.GameObjects.Rectangle;
   private localHud!: HUD;
   private partnerHud!: HUD;
   private sceneData: GameSceneData = {};
@@ -144,7 +141,7 @@ export class GameScene extends Phaser.Scene {
     const mapSeed = this.getMapSeed();
     this.mapGenerationSystem.generate(mapSeed);
 
-    this.createDepthOverlay();
+    this.depthEffectsSystem = new DepthEffectsSystem(this);
     this.createAnimals();
 
     this.player = new PlayerSubmarine(this, MAP_WIDTH / 2, MAP_HEIGHT / 2);
@@ -245,6 +242,8 @@ export class GameScene extends Phaser.Scene {
       this.removeActivityListeners();
       this.game.events.off("animal:discovered", this.handleAnimalDiscovered);
       this.clearPendingPuzzle();
+      this.depthEffectsSystem?.destroy();
+      this.depthEffectsSystem = undefined;
       this.removeAllSocketEventListeners();
     });
   }
@@ -274,7 +273,6 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.updatePartnerPosition(delta);
-    this.updateDepthOverlay();
   }
 
   private getMapSeed(): number {
@@ -528,32 +526,6 @@ export class GameScene extends Phaser.Scene {
     } else if (this.partner.x < previousX) {
       this.partner.setDirection("left");
     }
-  }
-
-  private createDepthOverlay(): void {
-    this.depthOverlay = this.add.rectangle(
-      0,
-      0,
-      this.scale.width,
-      this.scale.height,
-      0x000000,
-      1
-    );
-    this.depthOverlay.setOrigin(0, 0);
-    this.depthOverlay.setAlpha(0);
-    this.depthOverlay.setScrollFactor(0);
-    this.depthOverlay.setDepth(900);
-  }
-
-  private updateDepthOverlay(): void {
-    const depthStart = 800;
-    const depthRange = 500;
-    const depthProgress = Phaser.Math.Clamp(
-      (this.player.y - depthStart) / depthRange,
-      0,
-      1
-    );
-    this.depthOverlay.setAlpha(depthProgress * DEPTH_OVERLAY_MAX_ALPHA);
   }
 
   /**
