@@ -2,6 +2,24 @@ version: '3.8'
 
 services:
   #----------------------------------------
+  # MICROSSERVIÇO 0: AUTH SERVICE (REST)
+  #----------------------------------------
+  auth-service:
+    image: node:20-alpine
+    container_name: ocean_auth_service
+    working_dir: /app/auth
+    volumes:
+      - ./auth-service:/app/auth
+      - /app/auth/node_modules
+    ports:
+      - "3004:3004"
+    command: sh -c "npm install && npm run dev"
+    environment:
+      - PORT=3004
+      - NODE_ENV=development
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:9000
+ 
+  #----------------------------------------
   # MICROSSERVIÇO 1: GAME SERVICE (Sockets)
   #----------------------------------------
   game-service:
@@ -18,6 +36,10 @@ services:
       - PORT=3001
       - NODE_ENV=development
       - PUZZLE_API_URL=http://puzzle-api:3002
+      - AUTH_SERVICE_URL=http://auth-service:3004
+    depends_on:
+      - auth-service
+      - puzzle-api
 
   #----------------------------------------
   # MICROSSERVIÇO 2: PUZZLE API (REST)
@@ -73,7 +95,9 @@ services:
       - VITE_SOCKET_URL=http://localhost:3001       # game-service (movimentação)
       - VITE_SCORE_URL=http://localhost:3003        # score-service (resultado final)
       - VITE_API_URL=http://localhost:3002          # puzzle-api (REST)
+      - VITE_AUTH_URL=http://localhost:3004         # apelido
     depends_on:
       - game-service
       - puzzle-api
       - score-service
+      - auth-service
