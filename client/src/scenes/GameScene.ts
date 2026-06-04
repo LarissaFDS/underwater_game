@@ -24,6 +24,7 @@ import {
 } from "../socket/ScoreSocketManager";
 import { MapGenerationSystem } from "../systems/MapGenerationSystem";
 import { MovementSystem } from "../systems/MovementSystem";
+import { WaterEffectsSystem } from "../systems/WaterEffectsSystem";
 import { HUD } from "../ui/HUD";
 
 /**
@@ -58,6 +59,7 @@ export class GameScene extends Phaser.Scene {
   private partner!: PlayerSubmarine;
   private movementSystem!: MovementSystem;
   private mapGenerationSystem!: MapGenerationSystem;
+  private waterEffectsSystem?: WaterEffectsSystem;
   private animals: Animal[] = [];
   private depthOverlay!: Phaser.GameObjects.Rectangle;
   private localHud!: HUD;
@@ -145,6 +147,9 @@ export class GameScene extends Phaser.Scene {
     this.mapGenerationSystem.generate(mapSeed);
 
     this.createDepthOverlay();
+    // WaterEffectsSystem only adds atmospheric visuals. The existing
+    // lighting/depth overlay and its darkness progression are preserved.
+    this.waterEffectsSystem = new WaterEffectsSystem(this);
     this.createAnimals();
 
     this.player = new PlayerSubmarine(this, MAP_WIDTH / 2, MAP_HEIGHT / 2);
@@ -242,6 +247,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.waterEffectsSystem?.destroy();
+      this.waterEffectsSystem = undefined;
       this.removeActivityListeners();
       this.game.events.off("animal:discovered", this.handleAnimalDiscovered);
       this.clearPendingPuzzle();

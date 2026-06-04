@@ -19,6 +19,7 @@ Ele roda separado do backend e se comunica com ele via Socket.IO. O frontend nã
 - `Animal`: componente/entidade de interação. Possui raio de detecção usado para emitir aproximação.
 - `MovementSystem`: componente de lógica de movimento local. Mantém velocidade, direção visual e cálculo por delta fora da `GameScene`.
 - `MapGenerationSystem`: componente de geração do mapa. Usa seed para criar grade, obstáculos e decorações.
+- `WaterEffectsSystem`: componente visual atmosférico. Adiciona bolhas/partículas de água no mundo e uma vinheta fixa na câmera, sem participar de regras de jogo.
 
 ## 2.1. Sprites e HUD do gameplay
 
@@ -41,6 +42,14 @@ Os sprites PNG do gameplay ficam em `client/src/assets` e são centralizados em 
 `HUD` continua fixo na câmera com `setScrollFactor(0)`. Os corações passaram a usar `ui/heart.png`; acima da barra de O2, o HUD exibe `ui/o2-bubble.png` alinhado ao início da barra e o texto "Oxigênio" à direita. O cálculo de O2, vidas, pontuação e eventos recebidos permanece igual.
 
 Essas mudanças são exclusivamente de frontend em `client/`; não alteram backend, microserviços, contratos Socket.IO, DTOs, eventos ou serviços.
+
+## 2.2. Efeitos visuais de água
+
+`WaterEffectsSystem`, em `client/src/systems/WaterEffectsSystem.ts`, concentra os efeitos atmosféricos do mapa. Ele cria bolhas pequenas que sobem lentamente em coordenadas de mundo, usando `setScrollFactor(1)` para que acompanhem a câmera como decoração do mapa.
+
+O mesmo sistema cria uma vinheta escura fixa na tela com `setScrollFactor(0)`, em depth abaixo dos overlays principais e do HUD. A vinheta usa escurecimento radial nas bordas para não introduzir faixas horizontais ou gradientes em camadas no mapa.
+
+Esses efeitos são puramente frontend e não alteram backend, microserviços, Socket.IO, puzzle, O2, vidas, pontuação ou `EndScene`. A iluminação/profundidade existente da `GameScene`, incluindo o `depthOverlay` atual e sua progressão por profundidade, foi mantida.
 
 ## 3. Comunicação com backend
 
