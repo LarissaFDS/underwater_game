@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { NicknameScene } from "./scenes/NicknameScene";
 import { MenuScene } from "./scenes/MenuScene";
 import { GameScene } from "./scenes/GameScene";
 import { PuzzleScene } from "./scenes/PuzzleScene";
@@ -10,7 +11,7 @@ const config: Phaser.Types.Core.GameConfig = {
   height: 720,
   backgroundColor: "#0a1628",
   parent: "app",
-  scene: [MenuScene, GameScene, PuzzleScene, EndScene],
+  scene: [NicknameScene, MenuScene, GameScene, PuzzleScene, EndScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,

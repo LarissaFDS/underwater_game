@@ -1,5 +1,9 @@
 import { io } from "socket.io-client";
 import type { Socket } from "socket.io-client";
+import {
+  rememberGameStartIdentity,
+  rememberRoomJoinedIdentity,
+} from "../state/playerIdentity";
 
 export interface PlayerMovePayload {
   x: number;
@@ -12,6 +16,7 @@ export interface PlayerMovedPayload extends PlayerMovePayload {
 
 export interface PlayerIdentity {
   id: string;
+  nickname?: string;
 }
 
 export interface GameStartPayload {
@@ -19,10 +24,18 @@ export interface GameStartPayload {
   players?: Array<string | PlayerIdentity>;
   playerIds?: string[];
   ids?: string[];
+  nicknames?: Record<string, string>;
   animals?: AnimalStatePayload[];
 }
 
-export type RoomFullPayload = { message?: string } | string;
+export interface RoomJoinedPayload {
+  playerId?: string;
+  id?: string;
+  socketId?: string;
+  nickname?: string;
+}
+
+export type RoomFullPayload = { message?: string; error?: string } | string;
 
 export interface AnimalApproachPayload {
   animalId: string;
@@ -136,6 +149,7 @@ export interface GameOverPayload {
 interface ServerToClientEvents {
   "player:moved": (payload: PlayerMovedPayload) => void;
   "game:start": (payload: GameStartPayload) => void;
+  "room:joined": (payload: RoomJoinedPayload) => void;
   "room:full": (payload?: RoomFullPayload) => void;
   "puzzle:start": (payload: PuzzleStartPayload) => void;
   "puzzle:result": (payload: PuzzleResultPayload) => void;
@@ -199,6 +213,7 @@ export class SocketManager {
       const auth = {
         clientType: "player",
         clientInstanceId: this.getClientInstanceId(),
+        token: sessionStorage.getItem("ocean_token"),
       };
 
       console.log(`[SocketManager] connecting to game-service = ${url}`);
@@ -212,6 +227,9 @@ export class SocketManager {
       });
       this.socket.on("connect_error", (error) => {
         console.error("[SocketManager] connect_error:", error.message);
+      });
+      this.socket.on("room:joined", (payload) => {
+        rememberRoomJoinedIdentity(payload);
       });
       this.bindStateCache();
     } else if (!this.socket.connected) {
@@ -287,8 +305,14 @@ export class SocketManager {
 
   public onGameStart(handler: (payload: GameStartPayload) => void): () => void {
     const socket = this.connect();
-    socket.on("game:start", handler);
-    return () => socket.off("game:start", handler);
+    const wrappedHandler = (payload: GameStartPayload): void => {
+      this.lastStateUpdate = undefined;
+      rememberGameStartIdentity(payload, socket.id);
+      handler(payload);
+    };
+
+    socket.on("game:start", wrappedHandler);
+    return () => socket.off("game:start", wrappedHandler);
   }
 
   public onRoomFull(handler: (payload?: RoomFullPayload) => void): () => void {
@@ -356,6 +380,9 @@ export class SocketManager {
       this.socket.disconnect();
       this.socket = undefined;
     }
+
+    this.lastStateUpdate = undefined;
+    this.isStateCacheBound = false;
   }
 
   private getServerUrl(): string {

@@ -17,6 +17,7 @@ const HEART_SIZE = 22;
 export class HUD extends Phaser.GameObjects.Container {
   private readonly oxygenFill: Phaser.GameObjects.Rectangle;
   private readonly hearts: Phaser.GameObjects.Image[];
+  private readonly nameLabel: Phaser.GameObjects.Text;
   private oxygenTween?: Phaser.Tweens.Tween;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -62,14 +63,26 @@ export class HUD extends Phaser.GameObjects.Container {
     this.oxygenFill.setOrigin(0, 0);
 
     this.hearts = this.createHearts(scene);
+    this.nameLabel = scene.add.text(0, OXYGEN_HEADER_Y - 24, "JOGADOR", {
+      fontSize: "16px",
+      color: "#94a3b8",
+      fontFamily: "Arial, sans-serif",
+      fontStyle: "bold"
+    });
+    this.nameLabel.setOrigin(0, 0.5);
 
     this.add([
+      this.nameLabel,
       oxygenIcon,
       oxygenLabel,
       oxygenBackground,
       this.oxygenFill,
       ...this.hearts,
     ]);
+  }
+  setPlayerName(name: string): void {
+    const displayName = name.trim() || "Jogador";
+    this.nameLabel.setText(displayName);
   }
 
   /**

@@ -24,10 +24,12 @@ export class MenuScene extends Phaser.Scene {
     this.roomIsFull = false;
     this.cameras.main.setBackgroundColor("#0a1628");
 
+    const nickname = sessionStorage.getItem("ocean_nickname") || "Jogador";
     const statusText = this.add
-      .text(640, 260, "Aguardando segundo jogador...", {
+      .text(640, 260, `Olá, ${nickname}!\nAguardando parceiro...`, {
         fontSize: "32px",
         color: "#ffffff",
+        align: "center"
       })
       .setOrigin(0.5);
 
@@ -42,12 +44,13 @@ export class MenuScene extends Phaser.Scene {
           return;
         }
 
-        if (this.getPlayerCount(payload) < 2) {
+        if (!this.canStartGame(payload)) {
           console.warn(
-            "[MenuScene] Ignoring game:start without two real players",
+            "[MenuScene] Ignoring game:start without two players and a valid seed",
             payload
           );
-          statusText.setText("Aguardando segundo jogador...");
+          statusText.setText(`Olá, ${nickname}!\nAguardando partida válida...`);
+          statusText.setColor("#bae6fd");
           return;
         }
 
@@ -74,12 +77,16 @@ export class MenuScene extends Phaser.Scene {
       return payload;
     }
 
-    return payload?.message ?? "Sala cheia. Tente novamente mais tarde.";
+    return payload?.message ?? payload?.error ?? "Sala cheia. Tente novamente mais tarde.";
   }
 
   private getPlayerCount(payload: GameStartPayload): number {
     const players = payload.playerIds ?? payload.ids ?? payload.players;
 
     return players?.length ?? 0;
+  }
+
+  private canStartGame(payload: GameStartPayload): boolean {
+    return this.getPlayerCount(payload) >= 2 && Number.isFinite(Number(payload.seed));
   }
 }

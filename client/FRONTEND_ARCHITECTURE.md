@@ -10,6 +10,7 @@ Ele roda separado do backend e se comunica com ele via Socket.IO. O frontend nã
 
 - `SocketManager`: componente central de comunicação com o `game-service`. Encapsula Socket.IO, tipa os eventos de gameplay e mantém o último `state:update` recebido.
 - `ScoreSocketManager`: componente de integração com o `score-service`. Escuta `game:result`, que entrega ao frontend o resultado final calculado pelo backend.
+- `NicknameScene`: componente de login. Envia o nickname ao `auth-service` por HTTP, guarda token/nickname de sessão e só libera o fluxo para Socket.IO quando o login é aceito.
 - `MenuScene`: componente de entrada e matchmaking visual. Exibe a espera pelo segundo jogador e inicia a partida quando recebe `game:start`.
 - `GameScene`: componente principal do jogo. Cria mapa, submarinos, câmera, HUDs, animais e integra eventos de multiplayer. Ela apenas congela/transiciona o fim da partida; não calcula pontuação.
 - `PuzzleScene`: componente do minigame da forca. Recebe os dados do animal e envia letras/dicas ao backend.
@@ -74,7 +75,9 @@ Esses efeitos são puramente frontend e não alteram backend, microserviços, So
 
 ## 4. Fluxo principal do jogo
 
-O usuário entra pela `MenuScene`, que abre a conexão Socket.IO e aguarda o backend formar a sala. Quando a sala está pronta, o backend emite `game:start` e a `GameScene` inicia com a seed do mapa.
+O usuário entra pela `NicknameScene`, que faz login HTTP no `auth-service` antes de qualquer conexão Socket.IO. Quando o login é aceito, o frontend guarda `ocean_token` e `ocean_nickname` em `sessionStorage` e segue para a `MenuScene`.
+
+A `MenuScene` abre a conexão Socket.IO pelo `SocketManager`. O token salvo é enviado no `auth` do handshake, junto do `clientInstanceId` por aba. A tela permanece aguardando o backend formar a sala. Quando a sala está pronta, o backend emite `game:start` com jogadores, nicknames e seed; só então a `GameScene` inicia com a seed do mapa.
 
 Na `GameScene`, o jogador local move o submarino com base no ponteiro. A posição local é enviada ao backend por `player:move`. O parceiro é sincronizado por eventos recebidos do backend, com suavização visual para evitar saltos.
 
@@ -83,6 +86,16 @@ Quando o jogador local se aproxima de um animal, a cena emite `animal:approach`.
 O backend valida acertos, erros, penalidades e progresso. O evento `state:update` mantém HUDs e estado visual sincronizados. Quando um jogador perde O2/vidas, `player:gameover` trata o respawn; quando a partida termina, `game:over` congela o fluxo definitivo e a `GameScene` mostra "Calculando pontuação..." enquanto aguarda o `game:result` do `score-service` para abrir a `EndScene`.
 
 Na `EndScene`, o botão "Jogar novamente" emite `game:restart` pelo `SocketManager`, pois reiniciar a sala é responsabilidade do `game-service`. Quando o `game-service` responde com novo `game:start`, a cena final fecha e a `GameScene` é recriada com a nova seed.
+
+## 4.1. Nicknames e seed de partida
+
+O `SocketManager` escuta `room:joined` para guardar o `playerId` local confirmado pelo backend e escuta `game:start` para guardar o mapa `playerId -> nickname`. A `GameScene` consolida esse estado em `sessionStorage` e no `registry` do Phaser, mantendo `localPlayerId`, `localNickname`, `partnerPlayerId`, `partnerNickname` e o mapa completo de nicknames.
+
+O `HUD` local recebe o nickname real do jogador logado. O `HUD` do parceiro recebe o nickname real do outro `playerId` vindo de `game:start`; os fallbacks visuais são usados apenas quando não há nickname disponível.
+
+A `EndScene` não exibe socketId nem índice de jogador. Ela resolve nomes a partir de campos explícitos do `game:result` quando existirem e, caso contrário, usa o mapa de nicknames preservado pela `GameScene` no estado frontend.
+
+No rematch, o frontend apenas emite `game:restart` e aguarda um novo `game:start` do backend. A `GameScene` usa exatamente a seed desse payload. O frontend não gera seed própria, não reaproveita seed antiga para iniciar mapa e não abre `GameScene` quando o payload não tem seed válida.
 
 ## 5. Separação entre jogador local e parceiro
 

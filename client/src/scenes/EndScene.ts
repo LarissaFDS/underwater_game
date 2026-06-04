@@ -1,6 +1,12 @@
 import Phaser from "phaser";
 import { socketManager, type GameStartPayload } from "../socket/SocketManager";
 import {
+  PLAYER_NICKNAMES_REGISTRY_KEY,
+  getPlayerIdentityState,
+  normalizeNickname,
+  resolveNicknameForPlayerId,
+} from "../state/playerIdentity";
+import {
   type AnimalScoreEntry,
   type GameResultPayload,
   type PlayerScoreSummary,
@@ -101,7 +107,7 @@ export class EndScene extends Phaser.Scene {
   private createWinnerBlock(panelX: number, panelY: number): void {
     const winner = this.getWinnerId();
     const winnerText = winner
-      ? this.formatPlayerName(winner)
+      ? this.formatPlayerName(winner, this.getWinnerNickname())
       : "Empate ou vencedor não informado";
     const animalsText = this.getDiscoveredAnimalsSummary();
 
@@ -162,14 +168,19 @@ export class EndScene extends Phaser.Scene {
 
     summaries.slice(0, 4).forEach((summary, index) => {
       const rowY = y - 38 + index * 42;
-      const playerId = summary.playerId ?? summary.id ?? summary.name;
+      const playerId = this.getSummaryPlayerId(summary);
 
       this.add
-        .text(x - 185, rowY, this.formatPlayerName(playerId), {
-          fontSize: "16px",
-          color: "#f8fafc",
-          wordWrap: { width: 210 },
-        })
+        .text(
+          x - 185,
+          rowY,
+          this.formatPlayerName(playerId, this.getSummaryNickname(summary)),
+          {
+            fontSize: "16px",
+            color: "#f8fafc",
+            wordWrap: { width: 210 },
+          }
+        )
         .setOrigin(0, 0.5);
 
       this.add
@@ -360,6 +371,15 @@ export class EndScene extends Phaser.Scene {
   }
 
   private startRestartedGame(payload: GameStartPayload): void {
+    if (!this.canStartGame(payload)) {
+      console.warn(
+        "[EndScene] Ignoring restart game:start without two players and a valid seed",
+        payload
+      );
+      this.restartStatus?.setText("Aguardando game:start válido do backend");
+      return;
+    }
+
     this.unsubscribeGameStart?.();
     this.unsubscribeGameStart = undefined;
     this.scene.stop("PuzzleScene");
@@ -376,7 +396,9 @@ export class EndScene extends Phaser.Scene {
 
     if (reason === "elimination") {
       const winner = this.getWinnerId();
-      return winner ? `${this.formatPlayerName(winner)} venceu!` : "Fim de jogo";
+      return winner
+        ? `${this.formatPlayerName(winner, this.getWinnerNickname())} venceu!`
+        : "Fim de jogo";
     }
 
     return "Fim de jogo";
@@ -450,21 +472,33 @@ export class EndScene extends Phaser.Scene {
         : undefined;
 
     if (eliminatedPlayerId) {
-      return this.formatPlayerName(eliminatedPlayerId);
+      return this.formatPlayerName(
+        eliminatedPlayerId,
+        this.readStringField("eliminatedPlayerNickname", "eliminatedPlayerName")
+      );
     }
 
     const winnerId = this.getWinnerId();
     const eliminatedSummary = this.getPlayerSummaries().find(
-      (summary) => (summary.playerId ?? summary.id ?? summary.name) !== winnerId
+      (summary) => this.getSummaryPlayerId(summary) !== winnerId
     );
 
     return this.formatPlayerName(
-      eliminatedSummary?.playerId ?? eliminatedSummary?.id ?? eliminatedSummary?.name
+      this.getSummaryPlayerId(eliminatedSummary),
+      eliminatedSummary ? this.getSummaryNickname(eliminatedSummary) : undefined
     );
   }
 
   private getWinnerId(): string | null {
     return this.result.winner ?? this.result.winnerId ?? null;
+  }
+
+  private getWinnerNickname(): string | undefined {
+    return this.readStringField(
+      "winnerNickname",
+      "winnerName",
+      "winnerDisplayName"
+    );
   }
 
   private getDiscoveredAnimalsSummary(): string {
@@ -527,34 +561,111 @@ export class EndScene extends Phaser.Scene {
     return [];
   }
 
-  private formatPlayerName(playerId?: ScoreCellValue): string {
+  private formatPlayerName(
+    playerId?: ScoreCellValue,
+    explicitNickname?: unknown
+  ): string {
+    const trustedNickname = normalizeNickname(explicitNickname);
+
+    if (trustedNickname) {
+      return trustedNickname;
+    }
+
     if (playerId === null || playerId === undefined || playerId === "") {
       return "Jogador não informado";
     }
 
     const rawId = String(playerId);
-    const currentSocketId = socketManager.currentSocket?.id;
-    const summaries = this.getPlayerSummaries();
-    const playerIndex = summaries.findIndex(
-      (summary) =>
-        summary.playerId === rawId || summary.id === rawId || summary.name === rawId
-    );
-    const label =
-      rawId === currentSocketId
-        ? "Você"
-        : playerIndex >= 0
-          ? `Jogador ${playerIndex + 1}`
-          : "Jogador";
+    const registryNicknames = this.getRegistryNicknames();
+    const nickname = resolveNicknameForPlayerId(rawId, registryNicknames);
 
-    return `${label} (${this.shortenId(rawId)})`;
-  }
-
-  private shortenId(value: string): string {
-    if (value.length <= 14) {
-      return value;
+    if (nickname) {
+      return nickname;
     }
 
-    return `${value.slice(0, 6)}...${value.slice(-4)}`;
+    const identityState = getPlayerIdentityState(registryNicknames);
+    const isLocalPlayer =
+      rawId === socketManager.currentSocket?.id ||
+      rawId === identityState.localPlayerId;
+
+    if (isLocalPlayer) {
+      return identityState.localNickname ?? "Você";
+    }
+
+    const isKnownPartner =
+      rawId === identityState.partnerPlayerId ||
+      (identityState.playerIds.includes(rawId) &&
+        rawId !== identityState.localPlayerId);
+
+    if (isKnownPartner) {
+      return identityState.partnerNickname ?? "Parceiro";
+    }
+
+    return "Jogador não informado";
+  }
+
+  private getSummaryPlayerId(
+    summary?: PlayerScoreSummary
+  ): string | undefined {
+    if (!summary) {
+      return undefined;
+    }
+
+    return normalizeNickname(
+      summary.playerId ??
+        summary.id ??
+        (typeof summary.socketId === "string" ? summary.socketId : undefined) ??
+        summary.name
+    );
+  }
+
+  private getSummaryNickname(
+    summary: PlayerScoreSummary
+  ): string | undefined {
+    const explicitNickname = normalizeNickname(
+      summary.nickname ??
+        summary.playerNickname ??
+        summary.displayName ??
+        summary.playerName
+    );
+
+    if (explicitNickname) {
+      return explicitNickname;
+    }
+
+    const fallbackName = normalizeNickname(summary.name);
+    const summaryHasExplicitId = Boolean(summary.playerId ?? summary.id);
+
+    return !summaryHasExplicitId && this.isLikelyDisplayName(fallbackName)
+      ? fallbackName
+      : undefined;
+  }
+
+  private getRegistryNicknames(): unknown {
+    return this.registry.get(PLAYER_NICKNAMES_REGISTRY_KEY);
+  }
+
+  private isLikelyDisplayName(value?: string): value is string {
+    if (!value) {
+      return false;
+    }
+
+    const normalized = value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+    if (value.length > 16 || /^\d+$/.test(value)) {
+      return false;
+    }
+
+    return !/^(voce|parceiro|jogador\s*\d*)$/.test(normalized);
+  }
+
+  private canStartGame(payload: GameStartPayload): boolean {
+    const players = payload.playerIds ?? payload.ids ?? payload.players;
+
+    return (players?.length ?? 0) >= 2 && Number.isFinite(Number(payload.seed));
   }
 
   private formatValue(value: ScoreCellValue): string {
