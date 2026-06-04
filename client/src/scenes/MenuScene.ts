@@ -24,10 +24,12 @@ export class MenuScene extends Phaser.Scene {
     this.roomIsFull = false;
     this.cameras.main.setBackgroundColor("#0a1628");
 
+    const nickname = sessionStorage.getItem("ocean_nickname") || "Jogador";
     const statusText = this.add
-      .text(640, 260, "Aguardando segundo jogador...", {
+      .text(640, 260, `Olá, ${nickname}!\nAguardando parceiro...`, {
         fontSize: "32px",
         color: "#ffffff",
+        align: "center"
       })
       .setOrigin(0.5);
 
@@ -47,7 +49,14 @@ export class MenuScene extends Phaser.Scene {
             "[MenuScene] Ignoring game:start without two real players",
             payload
           );
-          statusText.setText("Aguardando segundo jogador...");
+          const nickname = sessionStorage.getItem("ocean_nickname") || "Jogador";
+          const statusText = this.add
+            .text(640, 260, `Olá, ${nickname}!\nAguardando parceiro...`, {
+              fontSize: "32px",
+              color: "#ffffff",
+              align: "center"
+            })
+            .setOrigin(0.5);
           return;
         }
 

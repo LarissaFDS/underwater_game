@@ -182,6 +182,18 @@ export class GameScene extends Phaser.Scene {
     this.partnerHud.setOxygen(100);
     this.partnerHud.setHearts(3);
 
+    //Extrai o nickname local
+    const localNickname = sessionStorage.getItem("ocean_nickname") || "Você";
+    this.localHud.setPlayerName(localNickname);
+
+    //Extrai o nickname do parceiro do payload do game:start
+    const partnerIdentity = this.sceneData.players?.find(p => 
+      typeof p !== "string" && p.id !== this.localPlayerId
+    ) as PlayerIdentity | undefined;
+
+    const partnerNickname = partnerIdentity?.nickname || partnerIdentity?.id?.slice(0, 6) || "Parceiro";
+    this.partnerHud.setPlayerName(partnerNickname);
+
     this.setupActivityListeners();
     this.game.events.on("animal:discovered", this.handleAnimalDiscovered);
 

@@ -12,6 +12,7 @@ export interface PlayerMovedPayload extends PlayerMovePayload {
 
 export interface PlayerIdentity {
   id: string;
+  nickname?: string;
 }
 
 export interface GameStartPayload {
@@ -199,6 +200,7 @@ export class SocketManager {
       const auth = {
         clientType: "player",
         clientInstanceId: this.getClientInstanceId(),
+        token: sessionStorage.getItem("ocean_token"),
       };
 
       console.log(`[SocketManager] connecting to game-service = ${url}`);

@@ -27,8 +27,12 @@ export class GameRoom {
 
   getPlayer(id: string): PlayerState | undefined { return this.players.get(id); }
 
-  addPlayer(id: string): PlayerState {
-    const player = new PlayerState(id);
+  /**
+   * Cria e registra um jogador com nickname validado pelo auth-service.
+   * O nickname padrão ('Jogador') é usado apenas como fallback de segurança.
+   */
+  addPlayer(id: string, nickname = 'Jogador'): PlayerState {
+    const player = new PlayerState(id, nickname);
     this.players.set(id, player);
     return player;
   }
@@ -36,6 +40,18 @@ export class GameRoom {
   removePlayer(id: string): void {
     this.players.delete(id);
     this.puzzleEndConfirmations.delete(id);
+  }
+
+  /**
+   * Retorna um mapa socketId → nickname para todos os jogadores presentes.
+   * Incluído em game:start para o frontend exibir apelidos no HUD e no placar.
+   */
+  getNicknames(): Record<string, string> {
+    const result: Record<string, string> = {};
+    this.players.forEach((player, id) => {
+      result[id] = player.nickname;
+    });
+    return result;
   }
 
   //Catalog
@@ -70,7 +86,6 @@ export class GameRoom {
   }
 
   //Monta o payload de animais descobertos para o score-service
-  //Usa os pontos do catálogo como base
   getDiscoveredAnimalsPayload(): DiscoveredAnimalRaw[] {
     const result: DiscoveredAnimalRaw[] = [];
 
@@ -90,8 +105,7 @@ export class GameRoom {
     return result;
   }
 
-  //Retorna o id do jogador que descobriu mais animais
-  //Em caso de empate retorna null
+  //Retorna o id do jogador que descobriu mais animais; empate → null
   getLeadingPlayerId(): string | null {
     const counts = new Map<string, number>();
 
