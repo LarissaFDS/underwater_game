@@ -22,6 +22,13 @@ import {
   scoreSocketManager,
   type GameResultPayload,
 } from "../socket/ScoreSocketManager";
+import {
+  LOCAL_PLAYER_ID_REGISTRY_KEY,
+  PARTNER_PLAYER_ID_REGISTRY_KEY,
+  PLAYER_NICKNAMES_REGISTRY_KEY,
+  rememberGameStartIdentity,
+  type PlayerIdentityState,
+} from "../state/playerIdentity";
 import { MapGenerationSystem } from "../systems/MapGenerationSystem";
 import { MovementSystem } from "../systems/MovementSystem";
 import { WaterEffectsSystem } from "../systems/WaterEffectsSystem";
@@ -114,11 +121,16 @@ export class GameScene extends Phaser.Scene {
    */
   init(data: GameSceneData = {}): void {
     this.sceneData = data;
+    this.playerIds = [];
+    this.localPlayerId = undefined;
+    this.animals = [];
+    this.partnerTarget.set(MAP_WIDTH / 2 + 120, MAP_HEIGHT / 2);
     this.animalsInRange.clear();
     this.triggeredAnimalIds.clear();
     this.isPuzzleActive = false;
     this.isGameOver = false;
     this.hasOpenedEndScene = false;
+    this.lastMoveEmissionTime = 0;
     this.lastObstacleHitTime = -OBSTACLE_HIT_COOLDOWN_MS;
     this.clearPendingPuzzle();
   }
@@ -138,12 +150,25 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     this.cameras.main.setBackgroundColor("#0a1628");
     this.mapGenerationSystem = new MapGenerationSystem(this);
-    this.playerIds = this.getPlayerIds();
-    //Socket.IO assigns the local id; GameScene uses it to separate local
-    //player updates from the partner's remote representation.
-    this.localPlayerId = socketManager.currentSocket?.id;
+    const identityState = rememberGameStartIdentity(
+      this.sceneData,
+      socketManager.currentSocket?.id
+    );
+
+    this.playerIds =
+      identityState.playerIds.length > 0
+        ? identityState.playerIds
+        : this.getPlayerIds();
+    this.localPlayerId =
+      identityState.localPlayerId ?? socketManager.currentSocket?.id;
+    this.storePlayerIdentityState(identityState);
 
     const mapSeed = this.getMapSeed();
+    if (mapSeed === undefined) {
+      this.showMissingSeedError();
+      return;
+    }
+
     this.mapGenerationSystem.generate(mapSeed);
 
     this.createDepthOverlay();
@@ -182,17 +207,10 @@ export class GameScene extends Phaser.Scene {
     this.partnerHud.setOxygen(100);
     this.partnerHud.setHearts(3);
 
-    //Extrai o nickname local
-    const localNickname = sessionStorage.getItem("ocean_nickname") || "Você";
-    this.localHud.setPlayerName(localNickname);
-
-    //Extrai o nickname do parceiro do payload do game:start
-    const partnerIdentity = this.sceneData.players?.find(p => 
-      typeof p !== "string" && p.id !== this.localPlayerId
-    ) as PlayerIdentity | undefined;
-
-    const partnerNickname = partnerIdentity?.nickname || partnerIdentity?.id?.slice(0, 6) || "Parceiro";
-    this.partnerHud.setPlayerName(partnerNickname);
+    this.localHud.setPlayerName(identityState.localNickname ?? "Você");
+    this.partnerHud.setPlayerName(
+      identityState.partnerNickname ?? "Parceiro"
+    );
 
     this.setupActivityListeners();
     this.game.events.on("animal:discovered", this.handleAnimalDiscovered);
@@ -296,23 +314,52 @@ export class GameScene extends Phaser.Scene {
     this.updateDepthOverlay();
   }
 
-  private getMapSeed(): number {
+  private getMapSeed(): number | undefined {
     const serverSeed = Number(this.sceneData.seed);
 
     if (Number.isFinite(serverSeed)) {
-      sessionStorage.setItem("mapSeed", String(serverSeed));
+      sessionStorage.setItem("ocean_last_game_seed", String(serverSeed));
       return serverSeed;
     }
 
-    const storedSeed = sessionStorage.getItem("mapSeed");
-    const storedSeedNumber = storedSeed ? Number(storedSeed) : NaN;
-    const fallbackSeed = Number.isFinite(storedSeedNumber)
-      ? storedSeedNumber
-      : Date.now();
+    return undefined;
+  }
 
-    sessionStorage.setItem("mapSeed", String(fallbackSeed));
+  private showMissingSeedError(): void {
+    const { width, height } = this.scale;
 
-    return fallbackSeed;
+    this.add
+      .text(
+        width / 2,
+        height / 2,
+        "Não foi possível iniciar a partida.\nAguardando uma seed válida do backend.",
+        {
+          fontSize: "24px",
+          color: "#fca5a5",
+          align: "center",
+          wordWrap: { width: 720 },
+        }
+      )
+      .setOrigin(0.5)
+      .setScrollFactor(0);
+
+    this.time.delayedCall(1800, () => {
+      if (this.scene.isActive("GameScene")) {
+        this.scene.start("MenuScene");
+      }
+    });
+  }
+
+  private storePlayerIdentityState(identityState: PlayerIdentityState): void {
+    this.registry.set(PLAYER_NICKNAMES_REGISTRY_KEY, identityState.nicknames);
+    this.registry.set(
+      LOCAL_PLAYER_ID_REGISTRY_KEY,
+      identityState.localPlayerId
+    );
+    this.registry.set(
+      PARTNER_PLAYER_ID_REGISTRY_KEY,
+      identityState.partnerPlayerId
+    );
   }
 
   private setupActivityListeners(): void {

@@ -63,7 +63,6 @@ export class HUD extends Phaser.GameObjects.Container {
     this.oxygenFill.setOrigin(0, 0);
 
     this.hearts = this.createHearts(scene);
-    //NICKNAE
     this.nameLabel = scene.add.text(0, OXYGEN_HEADER_Y - 24, "JOGADOR", {
       fontSize: "16px",
       color: "#94a3b8",
@@ -81,9 +80,9 @@ export class HUD extends Phaser.GameObjects.Container {
       ...this.hearts,
     ]);
   }
-  //metodo para nickname
   setPlayerName(name: string): void {
-    this.nameLabel.setText(name.toUpperCase());
+    const displayName = name.trim() || "Jogador";
+    this.nameLabel.setText(displayName);
   }
 
   /**
