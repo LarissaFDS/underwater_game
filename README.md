@@ -372,40 +372,57 @@ Os serviços que recebem chamadas do navegador precisam permitir a origem do fro
 | `start` | `npm start` | Executa `node build/index.js`. |
 
 ## Estrutura de pastas
-
 ```text
 underwater_game/
-├── auth-service/
+├── auth-service/          # Microsserviço de autenticação (TypeScript)
 │   ├── src/
-│   ├── package.json
-│   └── tsconfig.json
-├── client/
+│   │   ├── controllers/   # AuthController
+│   │   ├── services/      # AuthService
+│   │   ├── repositories/  # TokenRepository (in-memory, TTL 20min)
+│   │   ├── dtos/          # AuthDTO
+│   │   └── server/        # AuthServer (Express)
+│   └── package.json
+├── game-service/          # Microsserviço principal de jogo (TypeScript)
 │   ├── src/
-│   ├── .env.example
+│   │   ├── game/          # GameRoom
+│   │   ├── models/        # PlayerState, AnimalState
+│   │   ├── socket/        # events.ts
+│   │   ├── dtos/          # ScoreDTO
+│   │   └── server/        # GameServer (Socket.IO)
+│   └── package.json
+├── puzzle-api/            # API REST de puzzles (TypeScript)
+│   ├── src/
+│   │   ├── controllers/   # PuzzleController
+│   │   ├── services/      # PuzzleService
+│   │   ├── repositories/  # AnimalRepository
+│   │   ├── data/          # animals.ts (catálogo)
+│   │   └── app.ts
+│   └── package.json
+├── score-service/         # Microsserviço de pontuação (TypeScript)
+│   ├── src/
+│   │   ├── controllers/   # ScoreController
+│   │   ├── services/      # ScoreService, ScoreCalculator
+│   │   ├── repositories/  # GameResultRepository
+│   │   ├── socket/        # GameBridge (WS cliente)
+│   │   └── server/        # ScoreServer
+│   └── package.json
+├── client/                # Frontend Phaser + Vite (TypeScript)
+│   ├── src/
+│   │   ├── scenes/        # NicknameScene, MenuScene, GameScene, PuzzleScene, EndScene
+│   │   ├── entities/      # PlayerSubmarine, Animal
+│   │   ├── systems/       # MovementSystem, MapGenerationSystem, WaterEffectsSystem
+│   │   ├── socket/        # SocketManager, ScoreSocketManager
+│   │   ├── ui/            # HUD
+│   │   └── assets/        # PNG sprites + assetsMap.ts
+│   └── package.json
+├── docs/                  # Documentação complementar
+│   ├── DEPLOY.md          # Instruções detalhadas de deploy no Render
 │   ├── FRONTEND_ARCHITECTURE.md
-│   ├── package.json
-│   └── tsconfig.json
-├── docs/
-│   └── RELATORIO_PROJETO.md
-├── game-service/
-│   ├── src/
-│   ├── package.json
-│   └── tsconfig.json
-├── puzzle-api/
-│   ├── src/
-│   ├── package.json
-│   └── tsconfig.json
-├── score-service/
-│   ├── src/
-│   ├── package.json
-│   └── tsconfig.json
-├── shared/
-│   └── types/
-├── DEPLOY.md
-├── docker-compose.yml
-└── README.md
+│   └── relatorio.pdf
+├── docker-compose.yml     # Orquestração local de 5 containers
+└── shared/                # Tipos compartilhados entre serviços
+    └── types/             # Player, GameState, Animal
 ```
-
 ## Status do projeto
 
 O projeto está funcional e contém fluxo completo de login, sala multiplayer para 2 jogadores, gameplay, puzzles, pontuação final e rematch. Alguns pontos ainda podem evoluir.
