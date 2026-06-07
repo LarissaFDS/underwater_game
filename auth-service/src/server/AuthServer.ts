@@ -25,11 +25,10 @@ export class AuthServer {
     this.setupRoutes();
   }
 
-private setupMiddlewares(): void {
-  this.app.use(cors(this.corsOptions));
-  this.app.options('*', cors(this.corsOptions));
-  this.app.use(express.json());
-}
+  private setupMiddlewares(): void {
+    this.app.use(cors(this.corsOptions));
+    this.app.use(express.json());
+  }
 
   private setupRoutes(): void {
     //Composição de dependências (IoC manual), mesmo padrão dos outros serviços.
@@ -54,11 +53,10 @@ private setupMiddlewares(): void {
 
   private resolveAllowedOrigins(): string[] {
     const defaultOrigins = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'https://underwatergame.vercel.app',
-  'https://underwater-game.onrender.com',
-];
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'https://underwater-game.onrender.com',
+    ];
 
     const rawOrigins = [
       process.env.CLIENT_URL,
