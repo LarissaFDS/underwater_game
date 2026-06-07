@@ -26,6 +26,11 @@ O projeto foi desenvolvido para a disciplina de Engenharia de Software, com foco
 - Jogar novamente/rematch ao final da partida.
 - Efeitos visuais de água no frontend.
 
+## Demonstração
+
+- Demo pública: https://underwater-game.onrender.com/
+- Vídeo de apresentação: https://drive.google.com/file/d/1kaGGiPsMdLR__N8zGRzOdgbKi87pxIv_/view
+
 ## Arquitetura
 
 O repositório é um monorepo com frontend, quatro microserviços backend e tipos compartilhados.
@@ -439,7 +444,7 @@ Melhorias futuras:
 ## Créditos/equipe
 
 ```text
-Equipe: Larissa Ferreira, Otávio Menezes
+Equipe: Larissa Ferreira, Otávio Menezes e Zilderlan Naty
 Disciplina: Engenharia de Software
 Professor: Arturo Hernandes Dominguez
 ```
