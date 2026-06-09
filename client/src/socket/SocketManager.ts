@@ -4,6 +4,7 @@ import {
   rememberGameStartIdentity,
   rememberRoomJoinedIdentity,
 } from "../state/playerIdentity";
+import { getGameServiceUrl } from "../config/gameService";
 
 export interface PlayerMovePayload {
   x: number;
@@ -386,43 +387,7 @@ export class SocketManager {
   }
 
   private getServerUrl(): string {
-    const configuredUrl = import.meta.env.VITE_SOCKET_URL?.trim();
-
-    console.log("[SocketManager] VITE_SOCKET_URL =", configuredUrl || "(not set)");
-
-    if (configuredUrl) {
-      return configuredUrl;
-    }
-
-    return this.getLocalFallbackUrl("VITE_SOCKET_URL", "game-service", 3001);
-  }
-
-  private getLocalFallbackUrl(
-    envName: string,
-    serviceName: string,
-    port: number
-  ): string {
-    const fallbackHost =
-      typeof window === "undefined" ? "localhost" : window.location.hostname;
-    const pageProtocol =
-      typeof window === "undefined" ? "http:" : window.location.protocol;
-    const isLocalHost = [
-      "localhost",
-      "127.0.0.1",
-      "0.0.0.0",
-      "::1",
-      "[::1]",
-    ].includes(fallbackHost);
-
-    if (pageProtocol === "https:" && !isLocalHost) {
-      const message =
-        `[SocketManager] ${envName} is required for deployed HTTPS frontends. ` +
-        `Set it to the public HTTPS URL of the ${serviceName}.`;
-      console.error(message);
-      throw new Error(message);
-    }
-
-    return `http://${fallbackHost}:${port}`;
+    return getGameServiceUrl();
   }
 
   /**

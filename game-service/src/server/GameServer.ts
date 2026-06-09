@@ -80,6 +80,14 @@ export class GameServer {
     this.app.get('/', (_req: Request, res: Response) => {
       res.status(200).json({ status: 'ok', service: 'ocean-game-service' });
     });
+
+    this.app.get('/health', (_req: Request, res: Response) => {
+      res.status(200).json({
+        status: 'ok',
+        service: 'ocean-game-service',
+        timestamp: new Date().toISOString(),
+      });
+    });
   }
 
   private resolveCorsOrigin(): string | string[] {

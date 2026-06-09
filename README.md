@@ -336,13 +336,13 @@ Os serviços que recebem chamadas do navegador precisam permitir a origem do fro
 - O `game-service` mantém o estado da sala em memória. Por isso, em produção, recomenda-se usar apenas uma instância/replica desse serviço.
 - O Socket.IO deve estar habilitado na plataforma de deploy, com suporte a polling e websocket.
 - Sempre que as variáveis `VITE_*` forem alteradas, o frontend precisa ser buildado novamente.
-- Caso o frontend seja migrado futuramente para outra plataforma, como Vercel, basta atualizar as variáveis de ambiente e refazer o deploy.
+- O frontend permanece publicado no Render; se variáveis `VITE_*` mudarem, refaça o build/redeploy do Static Site.
 
 ## Fluxo do jogo
 
 1. O jogador informa um nickname.
 2. O `auth-service` valida o nickname e retorna token temporário.
-3. O frontend armazena o token e conecta ao `game-service`.
+3. O frontend armazena o token; antes do Socket.IO, a `WarmupScene` garante que o `game-service` respondeu em `/health`.
 4. Os jogadores aguardam a formação da sala.
 5. Quando há 2 jogadores, o `game-service` emite `game:start`.
 6. O frontend inicia a `GameScene` com a seed recebida.
@@ -433,8 +433,7 @@ Melhorias futuras:
 - persistência em banco de dados;
 - múltiplas salas simultâneas;
 - ranking/histórico de partidas;
-- API Gateway opcional;
-- deploy do frontend em Vercel futuramente, se a equipe decidir.
+- API Gateway opcional.
 
 ## Créditos/equipe
 
