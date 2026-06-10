@@ -4,7 +4,12 @@ export interface WarmupService {
 }
 
 interface ServiceConfig {
-  envName: "VITE_SOCKET_URL" | "VITE_AUTH_URL" | "VITE_SCORE_URL";
+  envName:
+    | "VITE_SOCKET_URL"
+    | "VITE_AUTH_URL"
+    | "VITE_SCORE_URL"
+    | "VITE_PUZZLE_API_URL";
+  fallbackEnvName?: "VITE_API_URL";
   name: string;
   serviceName: string;
   defaultPort: number;
@@ -33,6 +38,14 @@ const serviceConfigs: ServiceConfig[] = [
     defaultPort: 3003,
     logPrefix: "scoreService",
   },
+  {
+    envName: "VITE_PUZZLE_API_URL",
+    fallbackEnvName: "VITE_API_URL",
+    name: "API de puzzles",
+    serviceName: "puzzle-api",
+    defaultPort: 3002,
+    logPrefix: "puzzleApi",
+  },
 ];
 
 export function getGameServiceUrl(): string {
@@ -58,20 +71,33 @@ export function getWarmupServices(): WarmupService[] {
 
 function resolveServiceUrl(config: ServiceConfig): string {
   const configuredUrl = getConfiguredUrl(config.envName);
+  const fallbackConfiguredUrl =
+    !configuredUrl && config.fallbackEnvName
+      ? getConfiguredUrl(config.fallbackEnvName)
+      : "";
 
   console.log(
     `[${config.logPrefix}] ${config.envName} =`,
     configuredUrl || "(not set)"
   );
 
-  if (configuredUrl) {
-    return normalizeUrl(configuredUrl);
+  if (!configuredUrl && config.fallbackEnvName) {
+    console.log(
+      `[${config.logPrefix}] ${config.fallbackEnvName} =`,
+      fallbackConfiguredUrl || "(not set)"
+    );
+  }
+
+  if (configuredUrl || fallbackConfiguredUrl) {
+    return normalizeUrl(configuredUrl || fallbackConfiguredUrl);
   }
 
   return getLocalFallbackUrl(config);
 }
 
-function getConfiguredUrl(envName: ServiceConfig["envName"]): string {
+function getConfiguredUrl(
+  envName: ServiceConfig["envName"] | NonNullable<ServiceConfig["fallbackEnvName"]>
+): string {
   const env = import.meta.env as unknown as Record<string, string | undefined>;
   return env[envName]?.trim() ?? "";
 }

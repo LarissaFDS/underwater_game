@@ -37,7 +37,7 @@ Frontend em Vite + Phaser + TypeScript. Renderiza as cenas do jogo, captura aç�
 Componentes importantes:
 
 - `NicknameScene`: tela de login por nickname.
-- `WarmupScene`: aquece os serviços configurados antes de login e Socket.IO.
+- `WarmupScene`: aquece os serviços configurados, incluindo a `puzzle-api`, antes de login e Socket.IO.
 - `MenuScene`: entrada da sala e espera pelo segundo jogador.
 - `GameScene`: cena principal do jogo.
 - `PuzzleScene`: minigame de forca.
@@ -117,7 +117,7 @@ O projeto não usa API Gateway dedicado na versão atual. A comunicação princi
 - O frontend usa HTTP para login no `auth-service`.
 - O frontend usa Socket.IO com o `game-service` para gameplay.
 - O frontend usa Socket.IO com o `score-service` para receber o resultado final.
-- Antes disso, a `WarmupScene` chama `GET /health` nos serviços frontend-facing configurados por `VITE_SOCKET_URL`, `VITE_AUTH_URL` e `VITE_SCORE_URL`.
+- Antes disso, a `WarmupScene` chama `GET /health` nos serviços configurados por `VITE_SOCKET_URL`, `VITE_AUTH_URL`, `VITE_SCORE_URL` e `VITE_PUZZLE_API_URL`.
 - O `game-service` consulta o `auth-service` por HTTP para validar token.
 - O `game-service` consulta a `puzzle-api` por HTTP para catálogo, dicas e validação de letras.
 - O `score-service` conecta ao `game-service` por Socket.IO para receber `game:over`.
@@ -188,6 +188,7 @@ Variáveis usadas pelo Compose em desenvolvimento:
 - `VITE_SOCKET_URL=http://localhost:3001`
 - `VITE_SCORE_URL=http://localhost:3003`
 - `VITE_API_URL=http://localhost:3002`
+- `VITE_PUZZLE_API_URL=http://localhost:3002`
 - `VITE_AUTH_URL=http://localhost:3004`
 - `PUZZLE_API_URL=http://puzzle-api:3002`
 - `AUTH_SERVICE_URL=http://auth-service:3004`
@@ -249,6 +250,7 @@ No modo sem Docker, verifique se o frontend possui as variáveis locais corretas
 VITE_AUTH_URL=http://localhost:3004
 VITE_SOCKET_URL=http://localhost:3001
 VITE_SCORE_URL=http://localhost:3003
+VITE_PUZZLE_API_URL=http://localhost:3002
 ```
 
 As variáveis `VITE_*` precisam estar configuradas antes do build do frontend.
@@ -278,11 +280,12 @@ No frontend, as variáveis principais são:
 VITE_AUTH_URL=http://localhost:3004
 VITE_SOCKET_URL=http://localhost:3001
 VITE_SCORE_URL=http://localhost:3003
+VITE_PUZZLE_API_URL=http://localhost:3002
 ```
 
-Essas variáveis indicam onde estão o `auth-service`, o `game-service` e o `score-service`.
+Essas variáveis indicam onde estão o `auth-service`, o `game-service`, o `score-service` e a `puzzle-api`.
 
-A `WarmupScene` usa essas mesmas URLs e só avança para login quando todos os serviços configurados respondem HTTP 200 em `GET /health`. Isso aquece os serviços hospedados no Render antes de abrir conexões de login e Socket.IO, reduzindo o impacto de cold start. Cada microserviço deve manter uma rota `GET /health`; o `puzzle-api` também expõe essa rota, embora seja chamado pelo `game-service` e não diretamente pelo frontend.
+A `WarmupScene` usa essas mesmas URLs e só avança para login quando todos os serviços configurados respondem HTTP 200 em `GET /health`. Isso aquece os serviços hospedados no Render antes de abrir conexões de login e Socket.IO, reduzindo o impacto de cold start. A `puzzle-api` também entra nesse fluxo porque é dependência do `game-service` para catálogo, dicas e validação do puzzle. Mesmo sem ser chamada diretamente pelo frontend durante a partida, ela precisa estar acordada antes do jogo iniciar para evitar falha inicial do puzzle após cold start do Render. Cada microserviço deve manter uma rota `GET /health`.
 
 Em produção, os valores devem ser substituídos pelas URLs públicas HTTPS dos serviços hospedados na nuvem:
 
@@ -290,6 +293,7 @@ Em produção, os valores devem ser substituídos pelas URLs públicas HTTPS dos
 VITE_AUTH_URL=https://seu-auth-service.exemplo.com
 VITE_SOCKET_URL=https://seu-game-service.exemplo.com
 VITE_SCORE_URL=https://seu-score-service.exemplo.com
+VITE_PUZZLE_API_URL=https://sua-puzzle-api.exemplo.com
 ```
 
 Como o frontend utiliza Vite, qualquer variável iniciada com `VITE_` precisa estar configurada antes do build. Se uma dessas URLs for alterada na plataforma de deploy, será necessário executar um novo build/deploy do frontend.
@@ -316,7 +320,7 @@ No serviço do frontend, configure:
 - comando de build: `npm install && npm run build`;
 - diretório de publicação: `dist`.
 
-As variáveis `VITE_AUTH_URL`, `VITE_SOCKET_URL` e `VITE_SCORE_URL` devem apontar para as URLs públicas dos respectivos microserviços.
+As variáveis `VITE_AUTH_URL`, `VITE_SOCKET_URL`, `VITE_SCORE_URL` e `VITE_PUZZLE_API_URL` devem apontar para as URLs públicas dos respectivos microserviços. No Render do frontend, `VITE_PUZZLE_API_URL` deve apontar para a URL pública da `puzzle-api`.
 
 ### Microserviços
 
@@ -346,7 +350,7 @@ Os serviços que recebem chamadas do navegador precisam permitir a origem do fro
 
 ## Fluxo do jogo
 
-1. A `WarmupScene` garante que `auth-service`, `game-service` e `score-service` configurados responderam em `/health`.
+1. A `WarmupScene` garante que `auth-service`, `game-service`, `score-service` e `puzzle-api` configurados responderam em `/health`.
 2. O jogador informa um nickname.
 3. O `auth-service` valida o nickname e retorna token temporário.
 4. O frontend armazena o token após login.

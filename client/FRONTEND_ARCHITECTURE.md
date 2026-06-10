@@ -4,7 +4,7 @@
 
 The frontend lives in `client` and uses Vite, Phaser, TypeScript, and `socket.io-client`. It builds to `dist`, which is the directory published by the Render Static Site.
 
-The current deployment direction keeps both the frontend and the backend services on Render. The browser talks directly to the public Render services. The gameplay socket uses `VITE_SOCKET_URL`; login uses `VITE_AUTH_URL`; final score updates use `VITE_SCORE_URL`. The code must not hardcode Render URLs.
+The current deployment direction keeps both the frontend and the backend services on Render. The browser talks directly to the public Render services. The gameplay socket uses `VITE_SOCKET_URL`; login uses `VITE_AUTH_URL`; final score updates use `VITE_SCORE_URL`. The warmup also checks the `puzzle-api` through `VITE_PUZZLE_API_URL` because `game-service` depends on it during puzzle flow. The code must not hardcode Render URLs.
 
 ## Render deployment
 
@@ -23,6 +23,7 @@ Set the backend URLs before building the frontend:
 VITE_SOCKET_URL=https://URL-DO-GAME-SERVICE-RENDER
 VITE_AUTH_URL=https://URL-DO-AUTH-SERVICE-RENDER
 VITE_SCORE_URL=https://URL-DO-SCORE-SERVICE-RENDER
+VITE_PUZZLE_API_URL=https://URL-DA-PUZZLE-API-RENDER
 ```
 
 For local development, use:
@@ -31,25 +32,27 @@ For local development, use:
 VITE_SOCKET_URL=http://localhost:3001
 VITE_AUTH_URL=http://localhost:3004
 VITE_SCORE_URL=http://localhost:3003
+VITE_PUZZLE_API_URL=http://localhost:3002
 ```
 
-When a URL is not set during local development, the shared frontend config falls back to the matching localhost port. In a deployed HTTPS frontend, the variables must point to the public HTTPS URLs of the services.
+When a URL is not set during local development, the shared frontend config falls back to the matching localhost port. `VITE_API_URL` is still accepted as a legacy fallback for the puzzle API, but new environments should use `VITE_PUZZLE_API_URL`. In a deployed HTTPS frontend, the variables must point to the public HTTPS URLs of the services.
 
 ## Render warmup flow
 
-Render services can have a cold start after a period without traffic. To avoid opening login or Socket.IO connections while the backend services are still waking up, `WarmupScene` is the first Phaser scene. Before login and before any gameplay Socket.IO connection, it calls `GET /health` for every frontend-facing service configured in `client/src/config/services.ts`:
+Render services can have a cold start after a period without traffic. To avoid opening login or Socket.IO connections while the backend services are still waking up, `WarmupScene` is the first Phaser scene. Before login and before any gameplay Socket.IO connection, it calls `GET /health` for every service configured in `client/src/config/services.ts`:
 
 ```text
 ${VITE_SOCKET_URL}/health
 ${VITE_AUTH_URL}/health
 ${VITE_SCORE_URL}/health
+${VITE_PUZZLE_API_URL}/health
 ```
 
-Each service must expose `GET /health` and return HTTP 200 when ready. While a service is cold or unavailable, the user sees which service is being initialized:
+Each service must expose `GET /health` and return HTTP 200 when ready. The `puzzle-api` is not called directly by the frontend during gameplay, but `game-service` calls it for catalog, hints, and guess validation. Warming it before the match prevents the first puzzle from failing while Render wakes that service. While a service is cold or unavailable, the user sees which service is being initialized:
 
 ```text
 Inicializando o sistema...
-Aquecendo Servidor do jogo...
+Aquecendo API de puzzles...
 Isso pode levar alguns segundos no primeiro acesso.
 ```
 
@@ -62,7 +65,7 @@ This does not change Socket.IO event names, room behavior, player ids, seeds, ma
 ## Relevant files
 
 - `client/src/scenes/WarmupScene.ts`: startup screen, health check, retry limit, retry button.
-- `client/src/config/services.ts`: shared resolvers for `VITE_SOCKET_URL`, `VITE_AUTH_URL`, `VITE_SCORE_URL`, local fallbacks, and the warmup service list.
+- `client/src/config/services.ts`: shared resolvers for `VITE_SOCKET_URL`, `VITE_AUTH_URL`, `VITE_SCORE_URL`, `VITE_PUZZLE_API_URL`, local fallbacks, and the warmup service list.
 - `client/src/main.ts`: starts Phaser with `WarmupScene` first.
 - `client/src/socket/SocketManager.ts`: reuses the shared game-service URL resolver before creating Socket.IO.
 - `client/src/socket/ScoreSocketManager.ts`: reuses the shared score-service URL resolver before creating Socket.IO.
@@ -86,6 +89,6 @@ npm install
 npm run build
 ```
 
-To test the warmup locally, start the backend services and then run the frontend with `VITE_SOCKET_URL=http://localhost:3001`, `VITE_AUTH_URL=http://localhost:3004`, and `VITE_SCORE_URL=http://localhost:3003`. With any configured service stopped, the frontend should stay on the initialization/retry screen for that service and eventually show the retry option. With an invalid service URL, it should show the same error path after the retry limit.
+To test the warmup locally, start the backend services and then run the frontend with `VITE_SOCKET_URL=http://localhost:3001`, `VITE_AUTH_URL=http://localhost:3004`, `VITE_SCORE_URL=http://localhost:3003`, and `VITE_PUZZLE_API_URL=http://localhost:3002`. With any configured service stopped, the frontend should stay on the initialization/retry screen for that service and eventually show the retry option. With an invalid service URL, it should show the same error path after the retry limit.
 
 When all configured services respond to `/health` with HTTP 200, the frontend should advance past `WarmupScene`, allow login, and connect Socket.IO from `MenuScene` normally.
