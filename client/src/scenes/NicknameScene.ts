@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { getAuthServiceUrl } from "../config/services";
 import { rememberLoginNickname } from "../state/playerIdentity";
 
 export class NicknameScene extends Phaser.Scene {
@@ -113,7 +114,7 @@ export class NicknameScene extends Phaser.Scene {
     button.innerText = "Entrando...";
 
     try {
-      const authUrl = import.meta.env.VITE_AUTH_URL || "http://localhost:3004";
+      const authUrl = getAuthServiceUrl();
       const response = await fetch(`${authUrl}/api/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

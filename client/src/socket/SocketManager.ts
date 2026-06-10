@@ -4,7 +4,7 @@ import {
   rememberGameStartIdentity,
   rememberRoomJoinedIdentity,
 } from "../state/playerIdentity";
-import { getGameServiceUrl } from "../config/gameService";
+import { getGameServiceUrl } from "../config/services";
 
 export interface PlayerMovePayload {
   x: number;

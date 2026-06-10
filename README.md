@@ -37,6 +37,7 @@ Frontend em Vite + Phaser + TypeScript. Renderiza as cenas do jogo, captura aç�
 Componentes importantes:
 
 - `NicknameScene`: tela de login por nickname.
+- `WarmupScene`: aquece os serviços configurados antes de login e Socket.IO.
 - `MenuScene`: entrada da sala e espera pelo segundo jogador.
 - `GameScene`: cena principal do jogo.
 - `PuzzleScene`: minigame de forca.
@@ -88,6 +89,7 @@ Rotas principais:
 - `GET /api/animals`
 - `POST /api/puzzle/guess`
 - `POST /api/puzzle/hint`
+- `GET /health`
 
 Animais cadastrados no código atual:
 
@@ -115,6 +117,7 @@ O projeto não usa API Gateway dedicado na versão atual. A comunicação princi
 - O frontend usa HTTP para login no `auth-service`.
 - O frontend usa Socket.IO com o `game-service` para gameplay.
 - O frontend usa Socket.IO com o `score-service` para receber o resultado final.
+- Antes disso, a `WarmupScene` chama `GET /health` nos serviços frontend-facing configurados por `VITE_SOCKET_URL`, `VITE_AUTH_URL` e `VITE_SCORE_URL`.
 - O `game-service` consulta o `auth-service` por HTTP para validar token.
 - O `game-service` consulta a `puzzle-api` por HTTP para catálogo, dicas e validação de letras.
 - O `score-service` conecta ao `game-service` por Socket.IO para receber `game:over`.
@@ -279,6 +282,8 @@ VITE_SCORE_URL=http://localhost:3003
 
 Essas variáveis indicam onde estão o `auth-service`, o `game-service` e o `score-service`.
 
+A `WarmupScene` usa essas mesmas URLs e só avança para login quando todos os serviços configurados respondem HTTP 200 em `GET /health`. Isso aquece os serviços hospedados no Render antes de abrir conexões de login e Socket.IO, reduzindo o impacto de cold start. Cada microserviço deve manter uma rota `GET /health`; o `puzzle-api` também expõe essa rota, embora seja chamado pelo `game-service` e não diretamente pelo frontend.
+
 Em produção, os valores devem ser substituídos pelas URLs públicas HTTPS dos serviços hospedados na nuvem:
 
 ```env
@@ -337,22 +342,24 @@ Os serviços que recebem chamadas do navegador precisam permitir a origem do fro
 - O Socket.IO deve estar habilitado na plataforma de deploy, com suporte a polling e websocket.
 - Sempre que as variáveis `VITE_*` forem alteradas, o frontend precisa ser buildado novamente.
 - O frontend permanece publicado no Render; se variáveis `VITE_*` mudarem, refaça o build/redeploy do Static Site.
+- Restart manual via Render API exigiria um endpoint administrativo protegido no backend, por exemplo `POST /admin/restart-services`, que chamaria a Render API no servidor. A chave da Render API nunca deve ser colocada no frontend.
 
 ## Fluxo do jogo
 
-1. O jogador informa um nickname.
-2. O `auth-service` valida o nickname e retorna token temporário.
-3. O frontend armazena o token; antes do Socket.IO, a `WarmupScene` garante que o `game-service` respondeu em `/health`.
-4. Os jogadores aguardam a formação da sala.
-5. Quando há 2 jogadores, o `game-service` emite `game:start`.
-6. O frontend inicia a `GameScene` com a seed recebida.
-7. Os jogadores exploram o mapa com seus submarinos.
-8. Ao se aproximar dos animais, o frontend emite `animal:approach`.
-9. O `game-service` consulta a `puzzle-api` e abre o puzzle quando aplicável.
-10. O estado de jogadores, O2, vidas e progresso é sincronizado por Socket.IO.
-11. A partida termina por exploração ou eliminação.
-12. O `score-service` recebe `game:over`, calcula a pontuação e emite `game:result`.
-13. A `EndScene` mostra vencedor, motivo, pontuação e opção de jogar novamente.
+1. A `WarmupScene` garante que `auth-service`, `game-service` e `score-service` configurados responderam em `/health`.
+2. O jogador informa um nickname.
+3. O `auth-service` valida o nickname e retorna token temporário.
+4. O frontend armazena o token após login.
+5. Os jogadores aguardam a formação da sala.
+6. Quando há 2 jogadores, o `game-service` emite `game:start`.
+7. O frontend inicia a `GameScene` com a seed recebida.
+8. Os jogadores exploram o mapa com seus submarinos.
+9. Ao se aproximar dos animais, o frontend emite `animal:approach`.
+10. O `game-service` consulta a `puzzle-api` e abre o puzzle quando aplicável.
+11. O estado de jogadores, O2, vidas e progresso é sincronizado por Socket.IO.
+12. A partida termina por exploração ou eliminação.
+13. O `score-service` recebe `game:over`, calcula a pontuação e emite `game:result`.
+14. A `EndScene` mostra vencedor, motivo, pontuação e opção de jogar novamente.
 
 ## Scripts úteis
 

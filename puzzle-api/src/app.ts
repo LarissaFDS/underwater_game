@@ -29,6 +29,14 @@ export class App {
     this.app.get('/', (_req: Request, res: Response) => {
       res.status(200).json({ status: 'ok', service: 'ocean-puzzle-api' });
     });
+
+    this.app.get('/health', (_req: Request, res: Response) => {
+      res.status(200).json({
+        status: 'ok',
+        service: 'ocean-puzzle-api',
+        timestamp: new Date().toISOString(),
+      });
+    });
   }
 
   public listen(port: number): void {

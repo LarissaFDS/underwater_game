@@ -1,5 +1,8 @@
 import Phaser from "phaser";
-import { getGameServiceUrl } from "../config/gameService";
+import {
+  getWarmupServices,
+  type WarmupService,
+} from "../config/services";
 
 const MAX_HEALTH_ATTEMPTS = 20;
 const RETRY_DELAY_MS = 2500;
@@ -35,7 +38,7 @@ export class WarmupScene extends Phaser.Scene {
         height / 2 - 10,
         [
           "Inicializando o sistema...",
-          "Aquecendo servidor no Render...",
+          "Aquecendo servicos no Render...",
           "Isso pode levar alguns segundos no primeiro acesso.",
         ],
         {
@@ -71,25 +74,55 @@ export class WarmupScene extends Phaser.Scene {
     this.retryButton?.destroy();
     this.retryButton = undefined;
 
-    let serviceUrl: string;
+    let services: WarmupService[];
 
     try {
-      serviceUrl = getGameServiceUrl();
+      services = getWarmupServices();
     } catch (error) {
-      this.showError(error instanceof Error ? error.message : "URL do backend invalida.");
+      this.showError(
+        error instanceof Error ? error.message : "URL de servico invalida."
+      );
       return;
     }
 
-    for (let attempt = 1; attempt <= MAX_HEALTH_ATTEMPTS; attempt += 1) {
+    if (services.length === 0) {
+      this.showError("Nenhum servico foi configurado para inicializacao.");
+      return;
+    }
+
+    for (const service of services) {
+      const isHealthy = await this.waitForService(service);
+
       if (this.isShutdown) {
         return;
       }
 
-      this.attemptText?.setText(`Tentativa ${attempt}/${MAX_HEALTH_ATTEMPTS}`);
-
-      if (await this.checkHealth(serviceUrl)) {
-        this.scene.start("NicknameScene");
+      if (!isHealthy) {
+        this.showError(`Nao foi possivel conectar a ${service.name}.`);
         return;
+      }
+    }
+
+    this.scene.start("NicknameScene");
+  }
+
+  private async waitForService(service: WarmupService): Promise<boolean> {
+    for (let attempt = 1; attempt <= MAX_HEALTH_ATTEMPTS; attempt += 1) {
+      if (this.isShutdown) {
+        return false;
+      }
+
+      this.statusText?.setText([
+        "Inicializando o sistema...",
+        `Aquecendo ${service.name}...`,
+        "Isso pode levar alguns segundos no primeiro acesso.",
+      ]);
+      this.attemptText?.setText(
+        `${service.name} - tentativa ${attempt}/${MAX_HEALTH_ATTEMPTS}`
+      );
+
+      if (await this.checkHealth(service.url)) {
+        return true;
       }
 
       if (attempt < MAX_HEALTH_ATTEMPTS) {
@@ -97,7 +130,7 @@ export class WarmupScene extends Phaser.Scene {
       }
     }
 
-    this.showError("Nao foi possivel conectar ao servidor do jogo.");
+    return false;
   }
 
   private async checkHealth(serviceUrl: string): Promise<boolean> {
@@ -146,7 +179,7 @@ export class WarmupScene extends Phaser.Scene {
       this.statusText?.setColor("#ffffff");
       this.statusText?.setText([
         "Inicializando o sistema...",
-        "Aquecendo servidor no Render...",
+        "Aquecendo servicos no Render...",
         "Isso pode levar alguns segundos no primeiro acesso.",
       ]);
       void this.waitForBackend();

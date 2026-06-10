@@ -1,5 +1,6 @@
 import { io } from "socket.io-client";
 import type { Socket } from "socket.io-client";
+import { getScoreServiceUrl } from "../config/services";
 
 export type GameResultReason = "exploration" | "elimination" | string;
 
@@ -143,46 +144,7 @@ export class ScoreSocketManager {
   }
 
   private getScoreServerUrl(): string {
-    const configuredUrl = import.meta.env.VITE_SCORE_URL?.trim();
-
-    console.log(
-      "[ScoreSocketManager] VITE_SCORE_URL =",
-      configuredUrl || "(not set)"
-    );
-
-    if (configuredUrl) {
-      return configuredUrl;
-    }
-
-    return this.getLocalFallbackUrl("VITE_SCORE_URL", "score-service", 3003);
-  }
-
-  private getLocalFallbackUrl(
-    envName: string,
-    serviceName: string,
-    port: number
-  ): string {
-    const fallbackHost =
-      typeof window === "undefined" ? "localhost" : window.location.hostname;
-    const pageProtocol =
-      typeof window === "undefined" ? "http:" : window.location.protocol;
-    const isLocalHost = [
-      "localhost",
-      "127.0.0.1",
-      "0.0.0.0",
-      "::1",
-      "[::1]",
-    ].includes(fallbackHost);
-
-    if (pageProtocol === "https:" && !isLocalHost) {
-      const message =
-        `[ScoreSocketManager] ${envName} is required for deployed HTTPS frontends. ` +
-        `Set it to the public HTTPS URL of the ${serviceName}.`;
-      console.error(message);
-      throw new Error(message);
-    }
-
-    return `http://${fallbackHost}:${port}`;
+    return getScoreServiceUrl();
   }
 }
 
